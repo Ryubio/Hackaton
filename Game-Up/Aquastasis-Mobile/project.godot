@@ -1,0 +1,53 @@
+; Engine configuration file.
+; Aquastasis - COP31 Antalya hackathon prototype (Mobile-First Overhaul).
+; Autoload order is mandatory: EventBus, Balance, I18n, GameState.
+
+config_version=5
+
+[application]
+
+config/name="Aquastasis"
+config/description="COP31 Antalya - Mediterranean Ecosystem Defense"
+run/main_scene="res://main.tscn"
+run/max_fps=60
+config/features=PackedStringArray("4.3", "Mobile")
+config/icon="res://assets/icon.png"
+boot_splash/bg_color=Color(0.0431, 0.0588, 0.098, 1)
+boot_splash/image="res://assets/splash.png"
+boot_splash/fullsize=false
+boot_splash/use_filter=true
+
+[autoload]
+
+EventBus="*res://scripts/event_bus.gd"
+Balance="*res://scripts/balance.gd"
+I18n="*res://scripts/i18n.gd"
+GameState="*res://scripts/game_state.gd"
+AudioSynth="*res://scripts/audio_synth.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/mode=3
+window/handheld/orientation=4
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+scaling_3d/mode=0
+scaling_3d/scale=0.75
+anti_aliasing/quality/msaa_2d=0
+anti_aliasing/quality/msaa_3d=0
+lights_and_shadows/directional_shadow/size=512
+lights_and_shadows/positional_shadow/atlas_size=512
+environment/defaults/default_clear_color=Color(0.0431, 0.0588, 0.098, 1)

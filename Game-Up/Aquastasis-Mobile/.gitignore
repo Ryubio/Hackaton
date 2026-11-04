@@ -1,0 +1,11 @@
+# Godot 4 cache and generated files
+.godot/
+/android/
+
+# OS / OneDrive clutter
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Dev screenshots
+shots/
