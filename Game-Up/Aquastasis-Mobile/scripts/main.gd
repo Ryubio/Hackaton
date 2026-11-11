@@ -227,12 +227,23 @@ func _finish_boot() -> void:
 				GameState.debug_force_event(arg.trim_prefix("--event="))
 		if args.has("--tree"):
 			tree_ui.open()
+			for arg in args:
+				if arg.begins_with("--tree-branch="):
+					tree_ui._switch_branch(arg.trim_prefix("--tree-branch="))
 		if args.has("--help-modal"):
 			hud._show_manual()
 		if args.has("--step5"):
 			hud._set_directive_step(5)
+		if args.has("--basin"):
+			hud._left_panel.visible = true
+			hud._left_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+			hud._on_hud_resized()
 	else:
 		_to_main_menu()
+		if args.has("--achievements"):
+			menu._open_achievements_modal()
+		if args.has("--settings"):
+			menu._open_settings_modal()
 
 	if _loading_root != null:
 		if DisplayServer.get_name() == "headless":

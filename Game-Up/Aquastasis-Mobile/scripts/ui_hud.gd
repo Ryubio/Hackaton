@@ -22,7 +22,7 @@ const TOAST_AREA_H := 200.0
 const MAX_TOASTS := 3
 const TOAST_LIFE := 6.0
 
-const RES_BLOCK_W := 130.0
+const RES_BLOCK_W := 116.0
 const RES_ORDER := ["budget", "political", "science"]
 const RES_KEYS := {"budget": "hud.budget", "political": "hud.political", "science": "hud.science"}
 ## Snapshot keys of the net income per tick (before spending) of each resource.
@@ -399,7 +399,7 @@ func _build_top_bar() -> void:
 	_top_bar.offset_top = 0.0
 	_top_bar.offset_bottom = TOP_H
 	add_child(_top_bar)
-	var row := _hbox(8)
+	var row := _hbox(6)
 	_top_bar.add_child(row)
 
 	# Hidden compatibility nodes (updated by _on_tick_done)
@@ -431,7 +431,7 @@ func _build_top_bar() -> void:
 		pill.mouse_entered.connect(_on_res_hover.bind(pill, key))
 		pill.mouse_exited.connect(_hide_tip.bind(pill))
 		pill.gui_input.connect(func(ev: InputEvent) -> void:
-			if (ev is InputEventScreenTouch and ev.pressed) or (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
 				_on_res_hover(pill, key)
 		)
 		row.add_child(pill)
@@ -476,7 +476,7 @@ func _build_top_bar() -> void:
 	st_sb.content_margin_top = 4.0
 	st_sb.content_margin_bottom = 4.0
 	_sea_temp_pill.add_theme_stylebox_override("panel", st_sb)
-	_sea_temp_pill.custom_minimum_size = Vector2(210.0, 52.0)
+	_sea_temp_pill.custom_minimum_size = Vector2(188.0, 52.0)
 	_sea_temp_pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_sea_temp_pill.mouse_filter = Control.MOUSE_FILTER_STOP
 	_sea_temp_pill.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -545,7 +545,7 @@ func _build_top_bar() -> void:
 		btn.toggle_mode = true
 		btn.mouse_filter = Control.MOUSE_FILTER_STOP
 		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		btn.custom_minimum_size = Vector2(56.0, 56.0)
+		btn.custom_minimum_size = Vector2(50.0, 52.0)
 		btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_wire_button(btn)
 		btn.mouse_entered.connect(_on_speed_hover.bind(btn, i))
@@ -612,10 +612,10 @@ func _build_top_bar() -> void:
 	_audio_btn.add_child(_audio_icon)
 	row.add_child(_audio_btn)
 
-	# Dedicated Mobile "☰ MENÜ" Button (114x56 px)
+	# Dedicated Mobile "☰ MENÜ" Button (106x52 px)
 	_pause_menu_btn = Button.new()
 	_pause_menu_btn.theme_type_variation = &"ActionButton"
-	_pause_menu_btn.custom_minimum_size = Vector2(114.0, 56.0)
+	_pause_menu_btn.custom_minimum_size = Vector2(106.0, 52.0)
 	_pause_menu_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_pause_menu_btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	_pause_menu_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -632,19 +632,18 @@ func _build_top_bar() -> void:
 
 
 func _on_sea_temp_pill_input(event: InputEvent) -> void:
-	var pressed := false
-	if event is InputEventScreenTouch:
-		pressed = (event as InputEventScreenTouch).pressed
-	elif event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		pressed = mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
-	if not pressed:
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	AudioSynth.play_click()
 	GameState.vibrate_light()
 	if _left_panel != null:
-		_left_panel.visible = not _left_panel.visible
+		var will_open: bool = not _left_panel.visible
+		if will_open and _selected != "":
+			EventBus.region_selected.emit("")
+		_left_panel.visible = will_open
 		_left_panel.mouse_filter = Control.MOUSE_FILTER_STOP if _left_panel.visible else Control.MOUSE_FILTER_IGNORE
+		_on_hud_resized()
 
 
 # --- Basin status (left) ----------------------------------------------------------------
@@ -654,6 +653,7 @@ func _build_left_panel() -> void:
 	_left_panel.position = Vector2(MARGIN, PANEL_Y)
 	_left_panel.custom_minimum_size = Vector2(LEFT_W, 0.0)
 	_left_panel.size = Vector2(LEFT_W, 0.0)
+	_left_panel.z_index = 26
 	_left_panel.visible = false
 	_left_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_left_panel.draw.connect(_on_left_panel_draw)
@@ -883,18 +883,16 @@ func _on_toggle_left_panel() -> void:
 	_left_panel.visible = false
 	_left_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hide_tip_now()
+	_on_hud_resized()
 	AudioSynth.play_click()
 	GameState.vibrate_light()
 
 
 ## One-finger drag scrolling for ScrollContainers whose children would otherwise eat the drag.
 func _on_scroll_touch_drag(event: InputEvent, sc: ScrollContainer) -> void:
-	if event is InputEventScreenDrag:
-		var sd := event as InputEventScreenDrag
-		sc.scroll_vertical -= int(sd.relative.y)
-	elif event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if mm.device != InputEvent.DEVICE_ID_EMULATION and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			sc.scroll_vertical -= int(mm.relative.y)
 
 
@@ -1036,7 +1034,11 @@ func _build_tree_button() -> void:
 	_help_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_help_icon = _icon("help", UITheme.TEXT, 30.0)
 	_help_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_help_icon.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_help_icon.set_anchors_preset(Control.PRESET_CENTER)
+	_help_icon.offset_left = -15.0
+	_help_icon.offset_top = -15.0
+	_help_icon.offset_right = 15.0
+	_help_icon.offset_bottom = 15.0
 	_help_btn.add_child(_help_icon)
 	_wire_button(_help_btn)
 	_help_btn.pressed.connect(_show_manual)
@@ -1244,16 +1246,21 @@ func _build_toasts() -> void:
 
 
 func _safe_insets() -> Vector2:
-	return Vector2.ZERO
+	var s: Vector4 = UITheme.safe_insets(get_viewport())
+	return Vector2(s.x, s.z)
 
 
 ## Mobile: the toast feed sits on the right, just above the POLICY TREE button.
 func _layout_toasts() -> void:
 	var vs: Vector2 = get_viewport_rect().size
-	var ins: Vector2 = _safe_insets()
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var pad_r: float = MARGIN + safe.z
+	var pad_b: float = MARGIN + safe.w
 	_toast_avail = TOAST_AREA_H
-	_toast_box.position = Vector2(vs.x - MARGIN - ins.y - TOAST_W, vs.y - MARGIN - 76.0 - _toast_avail)
-	_toast_box.size = Vector2(TOAST_W, _toast_avail)
+	var box_h: float = maxf(_toast_avail, _toast_box.get_combined_minimum_size().y)
+	var bottom_y: float = vs.y - pad_b - 82.0
+	_toast_box.size = Vector2(TOAST_W, box_h)
+	_toast_box.position = Vector2(vs.x - pad_r - TOAST_W, bottom_y - box_h)
 
 
 ## The taller BASIN STATUS panel leaves less room: drop the oldest toast while the feed
@@ -1426,6 +1433,7 @@ func _build_directives() -> void:
 	_directive_body_label = RichTextLabel.new()
 	_directive_body_label.bbcode_enabled = true
 	_directive_body_label.fit_content = true
+	_directive_body_label.custom_minimum_size = Vector2(dw - 36.0, 0.0)
 	_directive_body_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_directive_body_label.add_theme_font_override("normal_font", UITheme.body_font())
 	_directive_body_label.add_theme_font_override("bold_font", UITheme.mono_bold_font())
@@ -1609,7 +1617,7 @@ func _build_manual_modal() -> void:
 		_help_backdrop.draw_rect(_help_backdrop.get_rect(), Color(0.012, 0.022, 0.045, 0.92))
 	)
 	_help_backdrop.gui_input.connect(func(ev: InputEvent) -> void:
-		if (ev is InputEventScreenTouch and ev.pressed) or (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
 			_close_manual()
 	)
 	_help_modal.add_child(_help_backdrop)
@@ -2152,16 +2160,18 @@ func _wire_long_press(ctrl: Control, cb: Callable) -> void:
 		var b := ctrl as BaseButton
 		b.button_down.connect(_on_hold_start.bind(ctrl, cb))
 		b.button_up.connect(_on_hold_end.bind(ctrl))
-	ctrl.gui_input.connect(_on_ctrl_hold_input.bind(ctrl, cb))
+	else:
+		ctrl.gui_input.connect(_on_ctrl_hold_input.bind(ctrl, cb))
 
 
 func _on_ctrl_hold_input(event: InputEvent, ctrl: Control, cb: Callable) -> void:
-	if event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		if st.pressed:
-			_on_hold_start(ctrl, cb)
-		else:
-			_on_hold_end(ctrl)
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_on_hold_start(ctrl, cb)
+			else:
+				_on_hold_end(ctrl)
 
 
 func _on_hold_start(ctrl: Control, cb: Callable) -> void:
@@ -2353,6 +2363,7 @@ func _on_toast(text_key: String, args: Dictionary, severity: int) -> void:
 	while _toasts.size() > MAX_TOASTS:
 		var oldest: Dictionary = _toasts[0]
 		_drop_toast(oldest["root"])
+	_layout_toasts.call_deferred()
 
 	var tw := root.create_tween()
 	tw.set_parallel(true)
@@ -2883,6 +2894,9 @@ func _select_region(region_id: String) -> void:
 	_region_status = ""
 	var vs: Vector2 = get_viewport_rect().size
 	if has:
+		if _left_panel != null and _left_panel.visible:
+			_left_panel.visible = false
+			_left_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_right_panel.visible = true
 		_right_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 		var card_h: float = maxf(_right_panel.get_combined_minimum_size().y, 272.0)
@@ -2911,24 +2925,36 @@ func _shrink_panels() -> void:
 
 func _on_hud_resized() -> void:
 	var vs: Vector2 = get_viewport_rect().size
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var pad_l: float = MARGIN + safe.x
+	var pad_r: float = MARGIN + safe.z
+	var pad_b: float = MARGIN + safe.w
 	if _top_bar != null:
-		_top_bar.size.x = vs.x
-		_top_bar.position = Vector2.ZERO
+		var tbsb := _top_bar.get_theme_stylebox("panel") as StyleBoxFlat
+		if tbsb != null:
+			var nsb := tbsb.duplicate() as StyleBoxFlat
+			nsb.content_margin_left = 14.0 + safe.x
+			nsb.content_margin_right = 14.0 + safe.z
+			_top_bar.add_theme_stylebox_override("panel", nsb)
 	if _right_panel != null:
 		var card_h: float = maxf(_right_panel.get_combined_minimum_size().y, 272.0)
-		_right_panel.position = Vector2(MARGIN, clampf(vs.y - MARGIN - card_h, TOP_H + 8.0, vs.y - MARGIN - 60.0))
+		_right_panel.position = Vector2(pad_l, clampf(vs.y - pad_b - card_h, TOP_H + 8.0, vs.y - pad_b - 60.0))
 	if _left_panel != null:
-		_left_panel.position = Vector2(MARGIN, TOP_H + 10.0)
+		_left_panel.position = Vector2(pad_l, TOP_H + 10.0)
 	if _bottom_right_bar != null:
-		_bottom_right_bar.position = Vector2(vs.x - MARGIN - 350.0, vs.y - MARGIN - 68.0)
+		_bottom_right_bar.position = Vector2(vs.x - pad_r - 350.0, vs.y - pad_b - 68.0)
 	if _ticker_strip != null:
-		_ticker_strip.position = Vector2(MARGIN, vs.y - MARGIN - TICKER_H)
+		_ticker_strip.position = Vector2(pad_l, vs.y - pad_b - TICKER_H)
 		_ticker_strip.visible = (_selected == "")
 	if _directive_box != null:
-		var dw: float = minf(vs.x - 32.0, 680.0)
+		var left_bound: float = (pad_l + LEFT_W + 14.0) if (_left_panel != null and _left_panel.visible) else pad_l
+		var avail_w: float = maxf(360.0, vs.x - left_bound - pad_r)
+		var dw: float = minf(avail_w - 16.0, 680.0)
 		_directive_box.custom_minimum_size = Vector2(dw, 0.0)
+		if _directive_body_label != null:
+			_directive_body_label.custom_minimum_size = Vector2(dw - 36.0, 0.0)
 		_directive_box.reset_size()
-		_directive_box.position = Vector2((vs.x - dw) * 0.5, TOP_H + 8.0)
+		_directive_box.position = Vector2(left_bound + (avail_w - dw) * 0.5, TOP_H + 8.0)
 	_layout_toasts()
 
 func _on_region_changed(region_id: String, data: Dictionary) -> void:

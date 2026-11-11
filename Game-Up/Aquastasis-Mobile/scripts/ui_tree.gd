@@ -16,9 +16,9 @@ const DETAILS_W := 420.0
 const GAP := 14.0
 const TABS_H := 46.0
 const COL_HEAD_H := 40.0
-const TILE := Vector2(150.0, 106.0)
+const TILE := Vector2(212.0, 110.0)
 const TILE_ICON := 48.0
-const TILE_DX := 160.0
+const TILE_DX := 128.0
 const CHAMFER := 12.0
 const ADOPT_AREA_H := 76.0
 const STRIP_LEFT_W := 900.0
@@ -37,7 +37,7 @@ const STATE_KEYS := {
 	"affordable": "ui.tree.state.affordable",
 	"adopted": "ui.tree.state.adopted",
 }
-const NAME_SIZES := [15, 14, 13, 12]
+const NAME_SIZES := [18, 17, 16, 15]
 const DESC_SIZES := [17, 16, 15]
 const FACT_SIZES := [15, 14, 13]
 
@@ -73,6 +73,8 @@ var _close_btn: Button
 var _close_row: HBoxContainer
 var _active_branch: String = "protect"
 var _branch_tabs: Dictionary = {}
+var _branch_tab_icons: Dictionary = {}
+var _branch_tab_labels: Dictionary = {}
 var _tabs_row: HBoxContainer
 
 # Columns and tiles
@@ -354,8 +356,8 @@ func _body_h() -> float:
 
 
 func _tier_y(tier: int) -> float:
-	var top: float = COL_HEAD_H + 6.0
-	var area: float = _body_h() - top - 4.0
+	var top: float = 10.0
+	var area: float = _body_h() - top - 10.0
 	return top + area * ((float(tier) - 0.5) / 4.0)
 
 
@@ -467,10 +469,21 @@ func _build() -> void:
 	_layout()
 
 
+func _target_scale() -> float:
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var avail := Vector2(maxf(320.0, size.x - safe.x - safe.z - 16.0), maxf(240.0, size.y - safe.y - safe.w - 16.0))
+	return minf(1.0, minf(avail.x / PANEL_SIZE.x, avail.y / PANEL_SIZE.y))
+
+
 func _layout() -> void:
 	if _panel == null:
 		return
-	_panel.position = ((size - PANEL_SIZE) * 0.5).floor()
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var safe_center := Vector2(safe.x + (size.x - safe.x - safe.z) * 0.5, safe.y + (size.y - safe.y - safe.w) * 0.5)
+	_panel.position = (safe_center - PANEL_SIZE * 0.5).floor()
+	if _anim == null or not _anim.is_running():
+		var ts: float = _target_scale()
+		_panel.scale = Vector2(ts, ts)
 	_backdrop.queue_redraw()
 
 
@@ -537,12 +550,10 @@ func _build_tabs() -> void:
 	_tabs_row.size = Vector2(PANEL_SIZE.x - PAD * 2.0, TABS_H)
 	_panel.add_child(_tabs_row)
 
-	var tab_icons := {
-		"protect": "🛡️ ",
-		"source": "🚫 ",
-		"science": "🔬 ",
-		"economy": "⚖️ ",
-	}
+	_branch_tabs.clear()
+	_branch_tab_icons.clear()
+	_branch_tab_labels.clear()
+
 	for b in TechTree.BRANCHES:
 		var branch: String = b
 		var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
@@ -552,13 +563,34 @@ func _build_tabs() -> void:
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.mouse_filter = Control.MOUSE_FILTER_STOP
 		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		btn.text = str(tab_icons.get(branch, "")) + I18n.t(str(info.get("name_key", "")))
-		btn.add_theme_font_override("font", UITheme.mono_bold_font())
-		btn.add_theme_font_size_override("font_size", 18)
+		btn.text = ""
 		_wire_button(btn)
 		btn.pressed.connect(_switch_branch.bind(branch))
 		_tabs_row.add_child(btn)
 		_branch_tabs[branch] = btn
+
+		var center_box := CenterContainer.new()
+		center_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		center_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		btn.add_child(center_box)
+
+		var row := _hbox(10)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		center_box.add_child(row)
+
+		var ic := Icons.new()
+		ic.setup("branch_" + branch, UITheme.TEXT_DIM, 20.0)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(ic)
+		_branch_tab_icons[branch] = ic
+
+		var lbl := Label.new()
+		lbl.text = I18n.t(str(info.get("name_key", "")))
+		lbl.add_theme_font_override("font", UITheme.mono_bold_font())
+		lbl.add_theme_font_size_override("font_size", 16)
+		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(lbl)
+		_branch_tab_labels[branch] = lbl
 
 	_update_branch_tabs()
 
@@ -597,13 +629,21 @@ func _update_branch_tabs() -> void:
 			continue
 		var is_active: bool = (str(b) == _active_branch)
 		var bcol: Color = _branch_color(str(b))
+		var ic: Icons = _branch_tab_icons.get(b, null)
+		var lbl: Label = _branch_tab_labels.get(b, null)
 		var sb: StyleBoxFlat
 		if is_active:
 			sb = UITheme.panel_box(bcol, UITheme.with_alpha(bcol, 0.28), 2, UITheme.with_alpha(bcol, 0.35), 14, 10)
-			btn.add_theme_color_override("font_color", Color.WHITE)
+			if ic != null:
+				ic.color = bcol
+			if lbl != null:
+				lbl.add_theme_color_override("font_color", Color.WHITE)
 		else:
 			sb = UITheme.panel_box(UITheme.LINE_DIM, UITheme.with_alpha(UITheme.DEEP, 0.65), 1, Color(0, 0, 0, 0), 0, 10)
-			btn.add_theme_color_override("font_color", UITheme.TEXT_DIM)
+			if ic != null:
+				ic.color = UITheme.TEXT_DIM
+			if lbl != null:
+				lbl.add_theme_color_override("font_color", UITheme.TEXT_DIM)
 		btn.add_theme_stylebox_override("normal", sb)
 		btn.add_theme_stylebox_override("hover", sb)
 		btn.add_theme_stylebox_override("pressed", sb)
@@ -643,8 +683,8 @@ func _make_tile(def: Dictionary) -> void:
 	var bi: int = maxi(TechTree.BRANCHES.find(branch), 0)
 	var tier: int = clampi(int(def.get("tier", 1)), 1, 4)
 	var slot: int = int(def.get("slot", 0))
-	var colw: float = _canvas_w() / 4.0
-	var cx: float = colw * (float(bi) + 0.5)
+	# Tabbed (one branch at a time) layout: every branch is centred in the canvas.
+	var cx: float = _canvas_w() * 0.5
 	if _tier_count(branch, tier) > 1:
 		cx += -TILE_DX if slot == 0 else TILE_DX
 	var center := Vector2(cx, _tier_y(tier))
@@ -1332,12 +1372,9 @@ func _refresh_details() -> void:
 
 
 func _on_scroll_touch_drag(event: InputEvent, sc: ScrollContainer) -> void:
-	if event is InputEventScreenDrag:
-		var sd := event as InputEventScreenDrag
-		sc.scroll_vertical -= int(sd.relative.y)
-	elif event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if mm.device != InputEvent.DEVICE_ID_EMULATION and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			sc.scroll_vertical -= int(mm.relative.y)
 
 
@@ -1539,28 +1576,8 @@ func _resist_chip(evo_id: String) -> PanelContainer:
 func _format_node_details_text(def: Dictionary) -> String:
 	var desc: String = I18n.t(str(def.get("desc_key", "")))
 	var lines := [desc]
-	var bullets: Array = []
-	for eff in def.get("effects", []):
-		var op: String = str(eff.get("op", ""))
-		var val: float = float(eff.get("value", 0.0))
-		match op:
-			"region":
-				var stat: String = str(eff.get("stat", ""))
-				bullets.append("• +%d %s" % [int(val), stat.capitalize()])
-			"mul":
-				var k: String = str(eff.get("key", "")).replace("_mult", "").replace("_", " ")
-				var pct: int = roundi((val - 1.0) * 100.0)
-				var sgn: String = "+" if pct > 0 else ""
-				bullets.append("• %s: %s%d%%" % [k.capitalize(), sgn, pct])
-			"add":
-				var k: String = str(eff.get("key", "")).replace("_", " ")
-				bullets.append("• %s: +%.1f" % [k.capitalize(), val])
-	if not bullets.is_empty():
-		lines.append("")
-		lines.append_array(bullets)
-	if def.get("requires", []).size() > 1:
-		lines.append("• Sinerji / Synergy: Çapraz dal entegrasyonu")
-	return "\n".join(lines)
+	return "
+".join(lines)
 
 
 ## Small icon button for a counter policy: hover previews it, click selects it in the tree.
@@ -1659,20 +1676,11 @@ func _set_tile_hover(v: float, id: String) -> void:
 
 
 func _on_tile_input(event: InputEvent, id: String) -> void:
-	if event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		if st.pressed:
-			_hover_id = ""
-			if _selected_id == id and _state_of(id) == "affordable":
-				_try_adopt(id)
-			else:
-				_select(id)
-		return
 	var mb := event as InputEventMouseButton
 	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	_hover_id = ""
-	if mb.double_click or (_selected_id == id and _state_of(id) == "affordable"):
+	if mb.double_click:
 		_selected_id = id
 		_try_adopt(id)
 	else:
@@ -1787,16 +1795,10 @@ func _on_language_changed(_lang: String) -> void:
 		var item: Array = pair
 		var l: Label = item[0]
 		l.text = I18n.t(str(item[1]))
-	var tab_icons := {
-		"protect": "🛡️ ",
-		"source": "🚫 ",
-		"science": "🔬 ",
-		"economy": "⚖️ "
-	}
 	for branch in TechTree.BRANCHES:
-		if _branch_tabs.has(branch):
+		if _branch_tab_labels.has(branch):
 			var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
-			_branch_tabs[branch].text = str(tab_icons.get(branch, "")) + I18n.t(str(info.get("name_key", "")))
+			_branch_tab_labels[branch].text = I18n.t(str(info.get("name_key", "")))
 	for k in _tiles:
 		_fit_tile_name(str(k))
 	_resist_sig = ""
@@ -1818,16 +1820,18 @@ func _fit_close_button() -> void:
 func _play_open() -> void:
 	if _anim != null and _anim.is_valid():
 		_anim.kill()
+	_layout()
+	var ts: float = _target_scale()
 	_backdrop.modulate = Color(1, 1, 1, 0)
 	_panel.modulate = Color(1, 1, 1, 0)
-	_panel.scale = Vector2(0.965, 0.965)
+	_panel.scale = Vector2(ts * 0.965, ts * 0.965)
 	_scan = 0.0
 	_backdrop.queue_redraw()
 	_anim = create_tween()
 	_anim.set_parallel(true)
 	_anim.tween_property(_backdrop, "modulate:a", 1.0, 0.22)
 	_anim.tween_property(_panel, "modulate:a", 1.0, 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_anim.tween_property(_panel, "scale", Vector2.ONE, 0.34).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_anim.tween_property(_panel, "scale", Vector2(ts, ts), 0.34).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_anim.tween_method(_set_scan, 0.0, 1.0, 0.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_fit_close_button.call_deferred()
 
@@ -1960,8 +1964,8 @@ func _draw_canvas() -> void:
 	_canvas.draw_style_box(sb, Rect2(0.0, 0.0, w, h))
 
 	# Tier background lines
-	for t in 4:
-		var ty: float = 65.0 + float(t) * 125.0
+	for t in range(1, 5):
+		var ty: float = _tier_y(t)
 		_dash(_canvas, Vector2(16.0, ty), Vector2(w - 16.0, ty), UITheme.with_alpha(bcol, 0.08), 1.0, 4.0, 8.0)
 
 func _dash(ci: CanvasItem, a: Vector2, b: Vector2, col: Color, width: float, dash: float, gap: float) -> void:

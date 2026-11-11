@@ -1387,11 +1387,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	var motion := event as InputEventMouseMotion
 	if motion != null:
+		if motion.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		_motion_reached_map = true
 		_mouse_pos = motion.position
 		return
 	var button := event as InputEventMouseButton
-	if button == null or not button.pressed:
+	if button == null or not button.pressed or button.device == InputEvent.DEVICE_ID_EMULATION:
 		return
 	if _menu_mode or GameState.menu_paused or not GameState.running:
 		return

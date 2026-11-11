@@ -338,14 +338,8 @@ func _label_rects(anchors: Dictionary) -> Array:
 # --- Input ------------------------------------------------------------------------------------
 
 func _on_bubble_input(event: InputEvent, node: Control) -> void:
-	var pressed := false
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		pressed = mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
-	elif event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		pressed = st.pressed
-	if not pressed:
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	node.accept_event()
 	var id: int = int(node.get_meta("bid", -1))
@@ -693,14 +687,8 @@ func _draw_alert_beacon(an: Control, region_id: String) -> void:
 
 
 func _on_alert_input(event: InputEvent, region_id: String, an: Control) -> void:
-	var pressed := false
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		pressed = mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
-	elif event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		pressed = st.pressed
-	if not pressed:
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	an.accept_event()
 	GameState.vibrate_medium()

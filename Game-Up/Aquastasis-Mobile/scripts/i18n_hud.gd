@@ -384,8 +384,8 @@ const STRINGS := {
 
 	# --- Mobile Enhancements: Auto-Save / Continue, 15 Achievements per Difficulty, Settings ---
 	"ui.menu.continue": {"tr": "DEVAM ET ({year})", "en": "CONTINUE ({year})", "ru": "ПРОДОЛЖИТЬ ({year})"},
-	"ui.menu.achievements": {"tr": "🏆 BAŞARIMLAR", "en": "🏆 ACHIEVEMENTS", "ru": "🏆 ДОСТИЖЕНИЯ"},
-	"ui.menu.settings": {"tr": "⚙ AYARLAR", "en": "⚙ SETTINGS", "ru": "⚙ НАСТРОЙКИ"},
+	"ui.menu.achievements": {"tr": "BAŞARIMLAR", "en": "ACHIEVEMENTS", "ru": "ДОСТИЖЕНИЯ"},
+	"ui.menu.settings": {"tr": "AYARLAR", "en": "SETTINGS", "ru": "НАСТРОЙКИ"},
 	"ui.settings.title": {"tr": "OYUN AYARLARI", "en": "GAME SETTINGS", "ru": "НАСТРОЙКИ ИГРЫ"},
 	"ui.settings.graphics": {"tr": "GRAFİK KALİTESİ", "en": "GRAPHICS QUALITY", "ru": "КАЧЕСТВО ГРАФИКИ"},
 	"ui.settings.gfx_low": {"tr": "Düşük (Maks. FPS)", "en": "Low (Max FPS)", "ru": "Низкое (Макс. FPS)"},

@@ -201,12 +201,16 @@ func clamp_all() -> void:
 	protection = clampf(protection, 0.0, 100.0)
 
 
-## 0 = pristine, 100 = collapsed.
+## 0 = pristine, 100 = collapsed. Protection (security/shield) and public awareness
+## directly mitigate the regional crisis level so field operations immediately lower crisis
+## and well-protected, high-awareness regions can reach 0% crisis.
 func crisis_level() -> float:
 	var c: float = pollution * B.CRISIS_W_POLLUTION \
 		+ (100.0 - coral_health) * B.CRISIS_W_CORAL \
 		+ (100.0 - seagrass) * B.CRISIS_W_SEAGRASS \
-		+ (100.0 - fish_stock) * B.CRISIS_W_FISH
+		+ (100.0 - fish_stock) * B.CRISIS_W_FISH \
+		- protection * 0.18 \
+		- awareness * 0.14
 	return clampf(c, 0.0, 100.0)
 
 

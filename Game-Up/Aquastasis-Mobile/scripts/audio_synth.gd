@@ -12,7 +12,6 @@ signal mute_changed(muted: bool)
 
 var _player: AudioStreamPlayer
 var _generator: AudioStreamGenerator
-var _playback: AudioStreamGeneratorPlayback
 
 var is_muted: bool = false
 var master_volume: float = 0.65
@@ -41,8 +40,16 @@ var _heartbeat_timer: float = 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS # Run even when simulation is paused
+	tree_exiting.connect(_cleanup_audio)
 	_load_saved_audio_settings()
 	_init_audio_pipeline()
+
+
+func _cleanup_audio() -> void:
+	if _player != null:
+		_player.stop()
+		_player.stream = null
+	_generator = null
 
 
 func _load_saved_audio_settings() -> void:
@@ -72,13 +79,16 @@ func _init_audio_pipeline() -> void:
 	_player.bus = &"Master"
 	add_child(_player)
 
-	# Start playback
-	_player.play()
-	_playback = _player.get_stream_playback()
+	# Start playback (skip on headless/Dummy audio driver to prevent unmixed playback leak)
+	if DisplayServer.get_name() != "headless" and AudioServer.get_driver_name() != "Dummy":
+		_player.play()
 
 
 func _process(delta: float) -> void:
-	if _playback == null or is_muted or master_volume <= 0.001:
+	if _player == null or not _player.playing or is_muted or master_volume <= 0.001:
+		return
+	var playback := _player.get_stream_playback() as AudioStreamGeneratorPlayback
+	if playback == null:
 		return
 
 	# Sonar auto-pulse every 9 seconds
@@ -95,7 +105,7 @@ func _process(delta: float) -> void:
 			_heartbeat_timer = 0.0
 			_heartbeat_time = 0.0
 
-	var frames_needed: int = _playback.get_frames_available()
+	var frames_needed: int = playback.get_frames_available()
 	if frames_needed <= 0:
 		return
 
@@ -180,7 +190,7 @@ func _process(delta: float) -> void:
 				_chord_time = -1.0
 
 		sample = clampf(sample * master_volume, -1.0, 1.0)
-		_playback.push_frame(Vector2(sample, sample))
+		playback.push_frame(Vector2(sample, sample))
 
 
 # --- Public Triggers ---

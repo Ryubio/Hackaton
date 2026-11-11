@@ -179,6 +179,16 @@ func _button(variation: String, icon_id: String, key: String, min_size: Vector2,
 		ic.offset_bottom = px * 0.5
 		btn.add_child(ic)
 		btn.add_theme_constant_override("h_separation", 8)
+		var pad_left: float = 20.0 + px + 8.0
+		var th: Theme = UITheme.build_theme()
+		for st_name in ["normal", "hover", "pressed", "disabled", "focus"]:
+			var base_sb: StyleBox = th.get_stylebox(st_name, StringName(variation))
+			if base_sb == null:
+				base_sb = th.get_stylebox(st_name, &"Button")
+			if base_sb is StyleBoxFlat:
+				var sb_copy := (base_sb as StyleBoxFlat).duplicate() as StyleBoxFlat
+				sb_copy.content_margin_left = pad_left
+				btn.add_theme_stylebox_override(st_name, sb_copy)
 	return btn
 
 
@@ -424,8 +434,8 @@ func _build_main() -> void:
 		var d_def: Dictionary = Balance.DIFFICULTIES[d_id]
 		var btn := Button.new()
 		btn.theme_type_variation = &"ChipButton"
-		btn.custom_minimum_size = Vector2(180.0, 56.0)
-		btn.text = d_def["badge"]
+		btn.custom_minimum_size = Vector2(200.0, 52.0)
+		btn.text = I18n.t(str(d_def.get("name_key", d_id)))
 		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		btn.pressed.connect(_on_diff_selected.bind(d_id))
 		diff_row.add_child(btn)
@@ -901,14 +911,16 @@ func show_main() -> void:
 	for it in _main_items:
 		var item: Control = it
 		item.modulate.a = 0.0
-	_set_main_margin(COLUMN_X - 60.0)
+	var safe_l: float = UITheme.safe_insets(get_viewport()).x
+	var target_x: float = COLUMN_X + safe_l
+	_set_main_margin(target_x - 60.0)
 	_anim = create_tween()
 	_anim.set_parallel(true)
 	_anim.set_trans(Tween.TRANS_CUBIC)
 	_anim.set_ease(Tween.EASE_OUT)
 	_anim.tween_property(_main_root, "modulate:a", 1.0, 0.7)
 	_anim.tween_method(_set_band, 0.0, 1.0, 0.9).set_trans(Tween.TRANS_EXPO)
-	_anim.tween_method(_set_main_margin, COLUMN_X - 60.0, COLUMN_X, 1.1)
+	_anim.tween_method(_set_main_margin, target_x - 60.0, target_x, 1.1)
 	_anim.tween_method(_set_title_reveal, 0.0, 1.0, 1.4).set_delay(0.15)
 	_anim.tween_method(_set_title_spacing, 34.0, 6.0, 1.7).set_delay(0.15)
 	_anim.tween_property(_rule, "scale:x", 1.0, 0.8).set_delay(0.6)
@@ -1101,12 +1113,9 @@ func _sync_achievements() -> void:
 
 
 func _on_scroll_touch_drag(event: InputEvent, sc: ScrollContainer) -> void:
-	if event is InputEventScreenDrag:
-		var sd := event as InputEventScreenDrag
-		sc.scroll_vertical -= int(sd.relative.y)
-	elif event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if mm.device != InputEvent.DEVICE_ID_EMULATION and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			sc.scroll_vertical -= int(mm.relative.y)
 
 
@@ -1264,19 +1273,19 @@ func _build_settings_modal() -> void:
 
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = &"MenuPanel"
-	panel.custom_minimum_size = Vector2(860.0, 620.0)
+	panel.custom_minimum_size = Vector2(860.0, 646.0)
 	panel.draw.connect(_bracket_draw.bind(panel, UITheme.HEALTHY))
 	center.add_child(panel)
 
-	var col := _vbox(10)
+	var col := _vbox(8)
 	panel.add_child(col)
 
 	var head := _hbox(12)
 	head.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(head)
-	head.add_child(_icon("globe", UITheme.HEALTHY, 32.0))
+	head.add_child(_icon("globe", UITheme.HEALTHY, 30.0))
 	var title := _label("TitleLabel", "ui.settings.title")
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", UITheme.HEALTHY)
 	head.add_child(title)
 
@@ -1285,7 +1294,7 @@ func _build_settings_modal() -> void:
 	col.add_child(sep)
 
 	var s_scroll := ScrollContainer.new()
-	s_scroll.custom_minimum_size = Vector2(780.0, 410.0)
+	s_scroll.custom_minimum_size = Vector2(780.0, 462.0)
 	s_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	s_scroll.follow_focus = true
 	s_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1293,14 +1302,14 @@ func _build_settings_modal() -> void:
 	s_scroll.gui_input.connect(_on_scroll_touch_drag.bind(s_scroll))
 	col.add_child(s_scroll)
 
-	var scol := _vbox(14)
+	var scol := _vbox(10)
 	scol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scol.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.gui_input.connect(_on_scroll_touch_drag.bind(s_scroll))
 	s_scroll.add_child(scol)
 
 	# 1. Graphics Quality
-	var gfx_box := _vbox(6)
+	var gfx_box := _vbox(4)
 	gfx_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(gfx_box)
 	gfx_box.add_child(_label("HeaderLabel", "ui.settings.graphics"))
@@ -1310,7 +1319,7 @@ func _build_settings_modal() -> void:
 	_gfx_buttons.clear()
 	var gfx_keys := {0: "ui.settings.gfx_low", 1: "ui.settings.gfx_med", 2: "ui.settings.gfx_high"}
 	for q in [0, 1, 2]:
-		var gb := _button("ChipButton", "", gfx_keys[q], Vector2(220.0, 56.0), UITheme.HEALTHY)
+		var gb := _button("ChipButton", "", gfx_keys[q], Vector2(220.0, 46.0), UITheme.HEALTHY)
 		gb.toggle_mode = true
 		gb.mouse_filter = Control.MOUSE_FILTER_PASS
 		gb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1319,7 +1328,7 @@ func _build_settings_modal() -> void:
 		_gfx_buttons[q] = gb
 
 	# 2. FPS Limit
-	var fps_box := _vbox(6)
+	var fps_box := _vbox(4)
 	fps_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(fps_box)
 	fps_box.add_child(_label("HeaderLabel", "ui.settings.fps"))
@@ -1333,7 +1342,7 @@ func _build_settings_modal() -> void:
 		fb.toggle_mode = true
 		fb.focus_mode = Control.FOCUS_NONE
 		fb.mouse_filter = Control.MOUSE_FILTER_PASS
-		fb.custom_minimum_size = Vector2(220.0, 56.0)
+		fb.custom_minimum_size = Vector2(220.0, 46.0)
 		fb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		fb.text = "%d FPS" % fps_val
 		fb.pressed.connect(_on_fps_selected.bind(fps_val))
@@ -1341,13 +1350,13 @@ func _build_settings_modal() -> void:
 		_fps_buttons[fps_val] = fb
 
 	# 3. Audio Volume & Haptics
-	var aud_box := _vbox(6)
+	var aud_box := _vbox(4)
 	aud_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(aud_box)
 	aud_box.add_child(_label("HeaderLabel", "ui.settings.audio"))
 	_audio_row(aud_box)
 
-	var hap_box := _vbox(6)
+	var hap_box := _vbox(4)
 	hap_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(hap_box)
 	hap_box.add_child(_label("HeaderLabel", "ui.settings.haptics"))
@@ -1356,7 +1365,7 @@ func _build_settings_modal() -> void:
 	hap_box.add_child(hap_row)
 	_haptic_buttons.clear()
 	for h_on in [true, false]:
-		var hb := _button("ChipButton", "", "ui.settings.on" if h_on else "ui.settings.off", Vector2(220.0, 56.0), UITheme.HEALTHY)
+		var hb := _button("ChipButton", "", "ui.settings.on" if h_on else "ui.settings.off", Vector2(220.0, 46.0), UITheme.HEALTHY)
 		hb.toggle_mode = true
 		hb.mouse_filter = Control.MOUSE_FILTER_PASS
 		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1365,7 +1374,7 @@ func _build_settings_modal() -> void:
 		_haptic_buttons[h_on] = hb
 
 	# 4. Language
-	var lng_box := _vbox(6)
+	var lng_box := _vbox(4)
 	lng_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(lng_box)
 	lng_box.add_child(_label("HeaderLabel", "ui.settings.lang"))
@@ -1380,7 +1389,7 @@ func _build_settings_modal() -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.mouse_filter = Control.MOUSE_FILTER_PASS
 		b.text = I18n.lang_name(code)
-		b.custom_minimum_size = Vector2(220.0, 56.0)
+		b.custom_minimum_size = Vector2(220.0, 46.0)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_lang_pressed.bind(code))
 		lng_row.add_child(b)
@@ -1393,7 +1402,7 @@ func _build_settings_modal() -> void:
 	var close_row := _hbox(12)
 	close_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(close_row)
-	var close_btn := _button("PrimaryButton", "check", "ui.settings.close", Vector2(320.0, 56.0), UITheme.HEALTHY)
+	var close_btn := _button("PrimaryButton", "check", "ui.settings.close", Vector2(320.0, 50.0), UITheme.HEALTHY)
 	close_btn.pressed.connect(_close_settings_modal)
 	close_row.add_child(close_btn)
 	_sync_settings_controls()
@@ -1472,6 +1481,8 @@ func _on_diff_selected(d_id: String) -> void:
 func _update_diff_selection(d_id: String) -> void:
 	for k in _diff_buttons.keys():
 		var btn: Button = _diff_buttons[k]
+		var k_def: Dictionary = Balance.DIFFICULTIES.get(k, {})
+		btn.text = I18n.t(str(k_def.get("name_key", k)))
 		if k == d_id:
 			var c: Color = UITheme.HEALTHY if k == "cadet" else (UITheme.AMBER if k == "commander" else UITheme.CRISIS)
 			btn.add_theme_color_override("font_color", c)

@@ -22,7 +22,8 @@ func _process(_delta: float) -> void:
 	_frame += 1
 	while not _shots.is_empty() and _frame >= int(_shots[0][0]):
 		var shot: Array = _shots.pop_front()
-		var path: String = ProjectSettings.globalize_path("res://" + str(shot[1]))
+		var p_str: String = str(shot[1])
+		var path: String = p_str if p_str.begins_with("/") else ProjectSettings.globalize_path("res://" + p_str)
 		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
 		var img: Image = get_viewport().get_texture().get_image()
 		img.save_png(path)

@@ -82,22 +82,38 @@ var _seen_events: Dictionary = {}        # event id -> tick it was shown
 var _next_event_tick: int = 0            # earliest tick for the next random card
 var _bubbles: Array = []                 # {"id", "kind", "region", "amount", "ttl", "born"}
 var _next_bubble_id: int = 1
+var project_ready_at: Dictionary = {}
+var _bio_algae_count: int = 0
+var difficulty: String = "commander"
+var antalya_collapse_limit: float = 75.0
+var pending_summit: Dictionary = {}
 
 
-func _init(p_seed: int = B.DEFAULT_SEED) -> void:
-	reset(p_seed)
+func _init(p_seed: int = B.DEFAULT_SEED, p_difficulty: String = "commander") -> void:
+	reset(p_seed, p_difficulty)
 
 
-func reset(p_seed: int) -> void:
+func reset(p_seed: int, p_difficulty: String = "commander") -> void:
+	difficulty = p_difficulty
+	var diff_def: Dictionary = B.DIFFICULTIES.get(difficulty, B.DIFFICULTIES["commander"])
+	antalya_collapse_limit = float(diff_def.get("antalya_collapse_limit", 75.0))
+	var res_mult: float = float(diff_def.get("resource_mult", 1.0))
+	var poll_mult: float = float(diff_def.get("pollution_mult", 1.0))
+
 	rng.seed = p_seed
 	_rng_events.seed = hash("events|%d" % p_seed)
 	_rng_bubbles.seed = hash("bubbles|%d" % p_seed)
 	regions.clear()
 	_links.clear()
 	_band.clear()
+	project_ready_at.clear()
+	pending_summit.clear()
+	_bio_algae_count = 0
 	for rid in RegionData.IDS:
 		var region_id: String = rid
 		var r: RegionData = RegionData.new(region_id)
+		if poll_mult != 1.0:
+			r.pollution = clampf(r.pollution * poll_mult, 0.0, 100.0)
 		regions[region_id] = r
 		_links[region_id] = _build_links(region_id)
 	for rid in RegionData.IDS:
@@ -109,9 +125,9 @@ func reset(p_seed: int) -> void:
 		_route_cooldown[i] = 0
 	tick = 0
 	temperature = B.TEMP_START
-	budget = B.BUDGET_START
-	political = B.POLITICAL_START
-	science = B.SCIENCE_START
+	budget = B.BUDGET_START * res_mult
+	political = B.POLITICAL_START * res_mult
+	science = B.SCIENCE_START * res_mult
 	actions_used = 0
 	branch_usage = {}
 	for aid in B.ACTION_ORDER:
@@ -215,6 +231,9 @@ func step() -> Dictionary:
 	_check_end()
 	if not over:
 		_schedule_events(res)
+		if B.SUMMIT_TICKS.has(tick) and pending_summit.is_empty():
+			pending_summit = _generate_summit(tick)
+			res["summit"] = pending_summit.duplicate(true)
 	if tick % B.HISTORY_EVERY == 0 or over:
 		history.append([tick, sea_health(), avg_crisis()])
 	_finish_result(res)
@@ -222,7 +241,156 @@ func step() -> Dictionary:
 
 
 func year() -> float:
-	return float(B.START_YEAR) + float(B.END_YEAR - B.START_YEAR) * float(tick) / float(B.TOTAL_TICKS)
+	return float(B.START_YEAR) + float(tick) / 12.0
+
+
+func year_int() -> int:
+	return B.START_YEAR + (tick / 12)
+
+
+func month_int() -> int:
+	return 1 + (tick % 12)
+
+
+func date_str() -> String:
+	return "%d / %02d" % [year_int(), month_int()]
+
+
+func defcon_level() -> int:
+	if over and not won:
+		return 1
+	var avg_c: float = avg_crisis()
+	var ant_c: float = _region("antalya").crisis_level() if regions.has("antalya") else 50.0
+	if avg_c >= 70.0 or temperature >= 3.6 or ant_c >= antalya_collapse_limit - 8.0:
+		return 1
+	elif avg_c >= 56.0 or temperature >= 3.1 or ant_c >= antalya_collapse_limit - 16.0:
+		return 2
+	elif avg_c >= 45.0 or temperature >= 2.6:
+		return 3
+	elif avg_c >= 35.0 or temperature >= 2.1:
+		return 4
+	return 5
+
+
+func antalya_integrity() -> float:
+	if not regions.has("antalya"):
+		return 100.0
+	var c: float = _region("antalya").crisis_level()
+	return clampf(100.0 - (c / maxf(antalya_collapse_limit, 1.0) * 100.0), 0.0, 100.0)
+
+
+func turtle_nests() -> int:
+	if not regions.has("antalya") or not regions.has("aegean"):
+		return 1000
+	var r_ant: RegionData = _region("antalya")
+	var r_aeg: RegionData = _region("aegean")
+	var base: float = 800.0
+	var seagrass_bonus: float = (r_ant.seagrass * 14.0) + (r_aeg.seagrass * 10.0)
+	var pollution_penalty: float = (r_ant.pollution * 12.0) + (r_aeg.pollution * 8.0)
+	return int(clampf(base + seagrass_bonus - pollution_penalty, 150.0, 4200.0))
+
+
+func monk_seals() -> int:
+	if not regions.has("marmara") or not regions.has("adriatic"):
+		return 120
+	var r_mar: RegionData = _region("marmara")
+	var r_adr: RegionData = _region("adriatic")
+	var base: float = 80.0
+	var protect_bonus: float = (r_mar.protection * 2.2) + (r_adr.protection * 2.8)
+	var fish_bonus: float = (r_adr.fish_stock * 1.4)
+	var poll_penalty: float = (r_mar.pollution * 1.5)
+	return int(clampf(base + protect_bonus + fish_bonus - poll_penalty, 25.0, 550.0))
+
+
+func _generate_summit(p_tick: int) -> Dictionary:
+	var summit_yr: int = 2026 + int(p_tick / 12)
+	var h: float = sea_health()
+	var temp: float = temperature
+	var target_health: float = 54.0 if p_tick == 60 else (60.0 if p_tick == 120 else 66.0)
+	var is_success: bool = h >= target_health and temp < 3.2
+	var choices: Array = []
+
+	if is_success:
+		choices = [
+			{
+				"title_key": "summit.choice.grant_budget.title",
+				"desc_key": "summit.choice.grant_budget.desc",
+				"budget": 150.0,
+				"political": 0.0,
+				"science": 0.0
+			},
+			{
+				"title_key": "summit.choice.mandate_pol.title",
+				"desc_key": "summit.choice.mandate_pol.desc",
+				"budget": 0.0,
+				"political": 45.0,
+				"science": 0.0
+			},
+			{
+				"title_key": "summit.choice.copernicus_sci.title",
+				"desc_key": "summit.choice.copernicus_sci.desc",
+				"budget": 0.0,
+				"political": 0.0,
+				"science": 50.0
+			}
+		]
+	else:
+		choices = [
+			{
+				"title_key": "summit.choice.lobby_concession.title",
+				"desc_key": "summit.choice.lobby_concession.desc",
+				"budget": 40.0,
+				"political": -30.0,
+				"science": 0.0
+			},
+			{
+				"title_key": "summit.choice.fiscal_austerity.title",
+				"desc_key": "summit.choice.fiscal_austerity.desc",
+				"budget": -75.0,
+				"political": 10.0,
+				"science": 0.0
+			},
+			{
+				"title_key": "summit.choice.emergency_pledge.title",
+				"desc_key": "summit.choice.emergency_pledge.desc",
+				"budget": 0.0,
+				"political": 20.0,
+				"science": -35.0
+			}
+		]
+
+	return {
+		"tick": p_tick,
+		"year": summit_yr,
+		"health": h,
+		"temp": temp,
+		"success": is_success,
+		"title_key": "summit.%d.title" % summit_yr,
+		"desc_key": ("summit.%d.success.desc" if is_success else "summit.%d.failure.desc") % summit_yr,
+		"choices": choices
+	}
+
+
+func resolve_summit(choice_idx: int) -> Dictionary:
+	if pending_summit.is_empty():
+		return {"ok": false}
+	var choices: Array = pending_summit.get("choices", [])
+	if choice_idx < 0 or choice_idx >= choices.size():
+		return {"ok": false}
+	var ch: Dictionary = choices[choice_idx]
+	var b_gain: float = float(ch.get("budget", 0.0))
+	var p_gain: float = float(ch.get("political", 0.0))
+	var s_gain: float = float(ch.get("science", 0.0))
+	budget = clampf(budget + b_gain, 0.0, B.RESOURCE_CAP)
+	political = clampf(political + p_gain, 0.0, B.RESOURCE_CAP)
+	science = clampf(science + s_gain, 0.0, B.RESOURCE_CAP)
+	var yr: int = int(pending_summit.get("year", 2031))
+	pending_summit.clear()
+	return {
+		"ok": true,
+		"toasts": [["toast.summit_resolved", {"year": str(yr)}, 1]],
+		"news": [["news.summit_concluded", {"year": str(yr)}, 1]]
+	}
 
 
 ## Sea Health Index 0-100: mean of region health weighted by coastal population.
@@ -267,13 +435,18 @@ func avg_awareness() -> float:
 ## spending (budget_rate / political_rate / science_rate) and a few extra stats.
 func snapshot() -> Dictionary:
 	var y: float = year()
-	var y_int: int = int(floorf(y))
+	var y_int: int = year_int()
+	var m_int: int = month_int()
+	var d_str: String = "%d / %02d" % [y_int, m_int]
 	var rates: Dictionary = income_rates()
 	return {
 		"tick": tick,
 		"year": y,
 		"year_int": y_int,
+		"month_int": m_int,
+		"date_str": d_str,
 		"years_left": maxi(B.END_YEAR - y_int, 0),
+		"months_left": maxi(B.TOTAL_TICKS - tick, 0),
 		"progress": clampf(float(tick) / float(B.TOTAL_TICKS), 0.0, 1.0),
 		"temperature": temperature,
 		"sea_health": sea_health(),
@@ -291,6 +464,55 @@ func snapshot() -> Dictionary:
 		"evolutions_active": _active_evos.size(),
 		"cards_seen": cards_seen,
 		"bubbles_collected": bubbles_collected_total,
+		"defcon": defcon_level(),
+		"antalya_integrity": antalya_integrity(),
+		"antalya_crisis": _region("antalya").crisis_level(),
+		"turtle_nests": turtle_nests(),
+		"monk_seals": monk_seals(),
+		"difficulty": difficulty,
+		"pending_summit": not pending_summit.is_empty(),
+	}
+
+
+func pollution_breakdown(region_id: String) -> Dictionary:
+	if not regions.has(region_id):
+		return {}
+	var r: RegionData = _region(region_id)
+	var heat: float = maxf(temperature - B.TEMP_START, 0.0)
+	var shipping_inflow: float = 0.0
+	var current_inflow: float = 0.0
+	for l in _links[region_id]:
+		var link: Dictionary = l
+		var other_id: String = link["id"]
+		var w: float = link["w"]
+		var p: float = _region(other_id).pollution
+		var is_ship: bool = false
+		for rt in RegionData.ROUTES:
+			var route: Dictionary = rt
+			if (route["a"] == region_id and route["b"] == other_id) or (route["b"] == region_id and route["a"] == other_id):
+				if str(route["kind"]) == "shipping":
+					is_ship = true
+				break
+		if is_ship:
+			shipping_inflow += p * w * B.NEIGHBOR_PRESSURE_COEFF * _mul("neighbor_pressure_mult")
+		else:
+			current_inflow += p * w * B.NEIGHBOR_PRESSURE_COEFF * _mul("neighbor_pressure_mult")
+
+	var coastal: float = r.coastal_pop * B.SOURCE_INFLOW_COEFF * _mul("inflow_mult") + B.BASE_POLLUTION_RATE * _mul("base_pollution_mult")
+	var heat_stress: float = heat * B.TEMP_STRESS_COEFF * _mul("heat_stress_mult")
+	var lever_share: float = r.pollution / B.LEVER_POLLUTION_REF
+	var protect_pull: float = r.protection * B.PROTECT_COEFF * _mul("protect_effect_mult") * lever_share
+	var aware_pull: float = r.awareness * B.AWARE_COEFF * _mul("aware_effect_mult") * lever_share
+	var shield_total: float = protect_pull + aware_pull
+	var net: float = (shipping_inflow + current_inflow + coastal + heat_stress) - shield_total
+
+	return {
+		"shipping": shipping_inflow,
+		"currents": current_inflow,
+		"coastal": coastal,
+		"heat": heat_stress,
+		"shield": shield_total,
+		"net": net,
 	}
 
 
@@ -298,7 +520,87 @@ func region_dict(region_id: String) -> Dictionary:
 	if not regions.has(region_id):
 		return {}
 	var r: RegionData = regions[region_id]
-	return r.to_dict()
+	var d: Dictionary = r.to_dict()
+	d["breakdown"] = pollution_breakdown(region_id)
+	d["trait_key"] = "region." + region_id + ".trait"
+	return d
+
+
+func can_synthesize_counter(evo_id: String) -> bool:
+	return _active_evos.has(evo_id) and science >= B.SCIENCE_CURE_COST
+
+
+func synthesize_counter(evo_id: String) -> Dictionary:
+	if not can_synthesize_counter(evo_id):
+		return {"ok": false}
+	science -= B.SCIENCE_CURE_COST
+	_active_evos.erase(evo_id)
+	_immune[evo_id] = true
+	_recompute_mods()
+	var def: Dictionary = TechTree.evolution_def(evo_id)
+	var name_key: String = str(def.get("name_key", evo_id))
+	var toasts: Array = [["sim.toast.cured", {"name": name_key}, 1]]
+	var news: Array = []
+	var news_key: String = str(def.get("cured_news_key", ""))
+	if not news_key.is_empty():
+		news.append([news_key, {}, 1])
+	return {
+		"ok": true,
+		"cured": [evo_id],
+		"toasts": toasts,
+		"news": news
+	}
+
+
+func can_perform_project(project_id: String) -> bool:
+	if over:
+		return false
+	match project_id:
+		"bio_algae":
+			return science >= B.PROJECT_BIO_ALGAE_COST and budget >= B.PROJECT_BIO_ALGAE_BUDGET and tick >= int(project_ready_at.get("bio_algae", 0))
+		"drone_swarm":
+			return science >= B.PROJECT_DRONE_SWARM_COST and budget >= B.PROJECT_DRONE_SWARM_BUDGET and tick >= int(project_ready_at.get("drone_swarm", 0))
+	return false
+
+
+func project_cooldown_left_ticks(project_id: String) -> int:
+	var ready_tick: int = int(project_ready_at.get(project_id, 0))
+	return maxi(ready_tick - tick, 0)
+
+
+func perform_project(project_id: String) -> Dictionary:
+	if not can_perform_project(project_id):
+		return {"ok": false}
+	match project_id:
+		"bio_algae":
+			science -= B.PROJECT_BIO_ALGAE_COST
+			budget -= B.PROJECT_BIO_ALGAE_BUDGET
+			project_ready_at["bio_algae"] = tick + B.PROJECT_BIO_ALGAE_CD_TICKS
+			_bio_algae_count += 1
+			var cooling: float = maxf(0.06 - float(_bio_algae_count - 1) * 0.003, 0.025)
+			temperature = maxf(temperature - cooling, 1.5)
+			for rid in RegionData.IDS:
+				var r: RegionData = _region(rid)
+				r.seagrass = clampf(r.seagrass + 4.5, 0.0, 100.0)
+			return {"ok": true, "id": "bio_algae", "toasts": [["toast.project.bio_algae", {}, 1]]}
+		"drone_swarm":
+			science -= B.PROJECT_DRONE_SWARM_COST
+			budget -= B.PROJECT_DRONE_SWARM_BUDGET
+			project_ready_at["drone_swarm"] = tick + B.PROJECT_DRONE_SWARM_CD_TICKS
+			var worst_id: String = ""
+			var worst_p: float = -1.0
+			for rid in RegionData.IDS:
+				var r: RegionData = _region(rid)
+				if r.pollution > worst_p:
+					worst_p = r.pollution
+					worst_id = rid
+			if worst_id != "":
+				var r: RegionData = _region(worst_id)
+				r.pollution = maxf(r.pollution - 12.0, 0.0)
+			budget = minf(budget + 35.0, B.RESOURCE_CAP)
+			political = minf(political + 12.0, B.RESOURCE_CAP)
+			return {"ok": true, "id": "drone_swarm", "toasts": [["toast.project.drone_swarm", {}, 1]]}
+	return {"ok": false}
 
 
 func can_afford(action_id: String) -> bool:
@@ -348,6 +650,7 @@ func perform(action_id: String, region_id: String) -> Dictionary:
 		"patrol":
 			var patrol_gain: float = B.PATROL_PROTECTION_GAIN * _mul("patrol_power_mult")
 			r.protection += _saturated(patrol_gain, r.protection, B.PATROL_SATURATION)
+			r.pollution = maxf(0.0, r.pollution - 1.5 * _mul("patrol_power_mult"))
 		"campaign":
 			var campaign_gain: float = B.CAMPAIGN_AWARENESS_GAIN * _mul("campaign_power_mult")
 			r.awareness += _saturated(campaign_gain, r.awareness, B.CAMPAIGN_SATURATION)
@@ -358,6 +661,7 @@ func perform(action_id: String, region_id: String) -> Dictionary:
 				var other: RegionData = _region(other_id)
 				other.awareness += _saturated(campaign_gain * B.CAMPAIGN_NEIGHBOR_SHARE, other.awareness, B.CAMPAIGN_SATURATION)
 				other.clamp_all()
+			r.pollution = maxf(0.0, r.pollution - 2.0 * _mul("campaign_power_mult"))
 	r.clamp_all()
 
 	var cooldown: int = int(def["cooldown_ticks"])
@@ -519,6 +823,10 @@ func income_rates() -> Dictionary:
 	if budget_gain > 0.0:
 		budget_gain *= _mul("budget_income_mult")
 	budget_gain += _add("budget_per_tick") + _add("blue_carbon") * float(blue_carbon_regions())
+	# Operational maintenance for extensive policy infrastructure
+	var adopted_count: int = _adopted.size()
+	if adopted_count > 10:
+		budget_gain -= float(adopted_count - 10) * 0.10
 	var aw: float = avg_awareness()
 	var political_gain: float = B.POLITICAL_INCOME_PER_TICK * (aw - B.POLITICAL_BREAKEVEN_AWARENESS) \
 		/ maxf(B.POLITICAL_REF_AWARENESS - B.POLITICAL_BREAKEVEN_AWARENESS, 1.0)
@@ -592,7 +900,9 @@ func _update_region_alerts(toasts: Array, news: Array) -> void:
 
 
 func _check_end() -> void:
-	if temperature >= B.TEMP_LOSE:
+	if _region("antalya").crisis_level() >= antalya_collapse_limit:
+		_finish(false, "lose_hq")
+	elif temperature >= B.TEMP_LOSE:
 		_finish(false, "lose_temperature")
 	elif sea_health() < B.LOSE_SEA_HEALTH:
 		_finish(false, "lose_health")
@@ -1331,6 +1641,22 @@ func _update_bubbles(res: Dictionary) -> void:
 	spawned.append(bubble.duplicate())
 
 
+## Spawns a dedicated bubble for onboarding/tutorial without waiting for RNG ticks.
+func spawn_tutorial_bubble(kind: String = "science", region_id: String = "antalya") -> Dictionary:
+	var bubble: Dictionary = {
+		"id": _next_bubble_id,
+		"kind": kind,
+		"region": region_id,
+		"amount": 25.0,
+		"ttl": 240,
+		"born": tick,
+	}
+	_next_bubble_id += 1
+	bubbles_spawned_total += 1
+	_bubbles.append(bubble)
+	return bubble
+
+
 ## Science bubbles surface anywhere; political ones favour regions with high awareness.
 func _bubble_region(political_kind: bool) -> String:
 	if not political_kind:
@@ -1346,3 +1672,78 @@ func _bubble_region(political_kind: bool) -> String:
 		if roll < 0.0:
 			return region_id
 	return RegionData.HERO_ID
+
+
+# --- Save / Load Serialization --------------------------------------------------------------
+
+func serialize() -> Dictionary:
+	var reg_data: Dictionary = {}
+	for rid in RegionData.IDS:
+		var r: RegionData = regions[rid]
+		reg_data[rid] = {
+			"pollution": r.pollution,
+			"coral_health": r.coral_health,
+			"seagrass": r.seagrass,
+			"fish_stock": r.fish_stock,
+			"awareness": r.awareness,
+			"protection": r.protection,
+		}
+	return {
+		"tick": tick,
+		"difficulty": difficulty,
+		"temperature": temperature,
+		"budget": budget,
+		"political": political,
+		"science": science,
+		"actions_used": actions_used,
+		"branch_usage": branch_usage.duplicate(true),
+		"regions": reg_data,
+		"adopted": _adopted.duplicate(true),
+		"adopted_order": _adopted_order.duplicate(true),
+		"active_evos": _active_evos.duplicate(true),
+		"evolved": _evolved.duplicate(true),
+		"immune": _immune.duplicate(true),
+		"ready_at": _ready_at.duplicate(true),
+		"project_ready_at": project_ready_at.duplicate(true),
+		"bio_algae_count": _bio_algae_count,
+		"history": history.duplicate(true),
+		"seen_events": _seen_events.duplicate(true),
+		"next_event_tick": _next_event_tick,
+	}
+
+
+func deserialize(data: Dictionary) -> void:
+	var diff: String = str(data.get("difficulty", "commander"))
+	reset(B.DEFAULT_SEED, diff)
+	tick = int(data.get("tick", 0))
+	temperature = float(data.get("temperature", B.TEMP_START))
+	budget = float(data.get("budget", B.BUDGET_START))
+	political = float(data.get("political", B.POLITICAL_START))
+	science = float(data.get("science", B.SCIENCE_START))
+	actions_used = int(data.get("actions_used", 0))
+	if data.has("branch_usage"):
+		branch_usage = data["branch_usage"].duplicate(true)
+	var reg_data: Dictionary = data.get("regions", {})
+	for rid in reg_data.keys():
+		if regions.has(rid):
+			var rd: Dictionary = reg_data[rid]
+			var r: RegionData = regions[rid]
+			r.pollution = float(rd.get("pollution", r.pollution))
+			r.coral_health = float(rd.get("coral_health", r.coral_health))
+			r.seagrass = float(rd.get("seagrass", r.seagrass))
+			r.fish_stock = float(rd.get("fish_stock", r.fish_stock))
+			r.awareness = float(rd.get("awareness", r.awareness))
+			r.protection = float(rd.get("protection", r.protection))
+			r.clamp_all()
+	_adopted = data.get("adopted", {}).duplicate(true)
+	_adopted_order = data.get("adopted_order", []).duplicate(true)
+	_active_evos = data.get("active_evos", []).duplicate(true)
+	_evolved = data.get("evolved", {}).duplicate(true)
+	_immune = data.get("immune", {}).duplicate(true)
+	_ready_at = data.get("ready_at", {}).duplicate(true)
+	project_ready_at = data.get("project_ready_at", {}).duplicate(true)
+	_bio_algae_count = int(data.get("bio_algae_count", 0))
+	history = data.get("history", []).duplicate(true)
+	_seen_events = data.get("seen_events", {}).duplicate(true)
+	_next_event_tick = maxi(int(data.get("next_event_tick", tick + 18)), tick + 6)
+	_recompute_mods()

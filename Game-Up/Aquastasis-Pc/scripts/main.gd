@@ -34,6 +34,7 @@ func _ready() -> void:
 
 	hud = UIHud.new()
 	hud.name = "HUD"
+	hud.map = map
 	_add_layer("HUDLayer", 2).add_child(hud)
 
 	tree_ui = UITree.new()
@@ -49,12 +50,15 @@ func _ready() -> void:
 	_add_layer("MenuLayer", 5).add_child(menu)
 
 	menu.start_requested.connect(_start_game)
+	menu.continue_requested.connect(_continue_game)
 	menu.resume_requested.connect(_resume)
 	menu.restart_requested.connect(_start_game)
 	menu.main_menu_requested.connect(_to_main_menu)
 	menu.quit_requested.connect(_quit)
 	EventBus.game_over.connect(_on_game_over)
 	EventBus.tree_toggle_requested.connect(_toggle_tree)
+	EventBus.event_triggered.connect(_on_event_triggered)
+	EventBus.pause_menu_requested.connect(_open_pause)
 
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.has("--autostart"):
@@ -68,8 +72,18 @@ func _ready() -> void:
 				GameState.debug_force_event(arg.trim_prefix("--event="))
 		if args.has("--tree"):
 			tree_ui.open()
+		if args.has("--help-modal"):
+			hud._show_manual()
+		if args.has("--step5"):
+			hud._set_directive_step(5)
+		if args.has("--pause"):
+			_open_pause()
 	else:
 		_to_main_menu()
+		if args.has("--achievements"):
+			menu._open_achievements_modal()
+		if args.has("--settings"):
+			menu._open_settings_modal()
 
 
 func _add_layer(layer_name: String, index: int) -> CanvasLayer:
@@ -87,7 +101,22 @@ func _start_game() -> void:
 	map.set_menu_mode(false)
 	hud.show_hud()
 	GameState.new_game()
-	GameState.set_speed(1)
+	GameState.set_speed(0)
+
+
+func _continue_game() -> void:
+	_close_modals()
+	_clear_selection()
+	menu.hide_all()
+	map.set_menu_mode(false)
+	hud.show_hud()
+	if GameState.load_saved_game():
+		if hud != null:
+			hud._dismiss_directives()
+		GameState.set_speed(1)
+	else:
+		GameState.new_game()
+		GameState.set_speed(0)
 
 
 func _to_main_menu() -> void:
@@ -140,6 +169,11 @@ func _toggle_tree() -> void:
 		tree_ui.toggle()
 
 
+func _on_event_triggered(_event_id: String) -> void:
+	if tree_ui.is_open():
+		tree_ui.close()
+
+
 ## True while nothing modal covers the game (menus, event card, policy tree).
 func _gameplay_input() -> bool:
 	return GameState.running and not menu.is_open() and not event_card.is_open() and not tree_ui.is_open()
@@ -149,33 +183,59 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	match key.keycode:
+	var code: int = key.keycode if key.keycode != 0 else key.physical_keycode
+	match code:
 		KEY_ESCAPE:
+			if menu != null and menu.is_modal_open():
+				menu.close_modals()
+				get_viewport().set_input_as_handled()
+				return
 			if not GameState.running or event_card.is_open():
 				return
-			if tree_ui.is_open():
+			if hud != null and hud.is_manual_open():
+				hud.close_manual()
+			elif tree_ui.is_open():
 				tree_ui.close()
 			elif menu.is_pause_open():
 				_resume()
 			elif not menu.is_open():
 				_open_pause()
+		KEY_F11:
+			var mode: int = DisplayServer.window_get_mode()
+			if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			else:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		KEY_T:
 			_toggle_tree()
+		KEY_H:
+			if _gameplay_input():
+				EventBus.tutorial_requested.emit()
 		KEY_SPACE:
 			if _gameplay_input():
-				GameState.toggle_pause()
-		KEY_1:
+				if hud != null and hud.is_directive_active() and hud.directive_step() == 5:
+					GameState.set_speed(1)
+					hud.complete_directives()
+				else:
+					GameState.toggle_pause()
+		KEY_1, KEY_KP_1:
 			if _gameplay_input():
 				GameState.set_speed(1)
-		KEY_2:
+				if hud != null and hud.is_directive_active() and hud.directive_step() == 5:
+					hud.complete_directives()
+		KEY_2, KEY_KP_2:
 			if _gameplay_input():
 				GameState.set_speed(2)
-		KEY_3:
+				if hud != null and hud.is_directive_active() and hud.directive_step() == 5:
+					hud.complete_directives()
+		KEY_3, KEY_KP_3, KEY_4, KEY_KP_4:
 			if _gameplay_input():
 				GameState.set_speed(3)
+				if hud != null and hud.is_directive_active() and hud.directive_step() == 5:
+					hud.complete_directives()
 		KEY_Q, KEY_W, KEY_E:
 			if _gameplay_input() and GameState.selected_region != "":
-				var action_id: String = Balance.ACTION_ORDER[int(ACTION_KEYS[key.keycode])]
+				var action_id: String = Balance.ACTION_ORDER[int(ACTION_KEYS[code])]
 				GameState.perform_action(action_id, GameState.selected_region)
 		_:
 			return

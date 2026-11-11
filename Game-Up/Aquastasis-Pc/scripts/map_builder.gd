@@ -342,6 +342,7 @@ var _cam_dist: float = MENU_DIST
 var _cam_pitch: float = MENU_PITCH
 var _snap_camera: bool = true
 var _parallax: Vector2 = Vector2.ZERO
+var _user_zoom: float = 1.0
 var _shake: float = 0.0
 var _shake_peak: float = 0.0
 
@@ -832,6 +833,7 @@ func _make_label(font_size: int, color: Color) -> Label3D:
 func _connect_bus() -> void:
 	EventBus.region_changed.connect(_on_region_changed)
 	EventBus.spread_happened.connect(_on_spread_happened)
+	EventBus.evolution_happened.connect(_on_evolution_happened)
 	EventBus.toast.connect(_on_toast)
 	EventBus.action_performed.connect(_on_action_performed)
 	EventBus.region_selected.connect(_on_region_selected)
@@ -1311,8 +1313,8 @@ func _update_camera(delta: float) -> void:
 	if camera == null or not camera.is_inside_tree():
 		return
 	var goal_target: Vector3 = MENU_TARGET if _menu_mode else GAME_TARGET
-	var goal_dist: float = MENU_DIST if _menu_mode else GAME_DIST
-	var goal_pitch: float = MENU_PITCH if _menu_mode else GAME_PITCH
+	var goal_dist: float = MENU_DIST if _menu_mode else (GAME_DIST * _user_zoom)
+	var goal_pitch: float = MENU_PITCH if _menu_mode else lerpf(48.0, GAME_PITCH, clampf((_user_zoom - 0.55) / 0.45, 0.0, 1.0))
 	if _snap_camera or delta <= 0.0:
 		_cam_target = goal_target
 		_cam_dist = goal_dist
@@ -1384,6 +1386,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if button == null or not button.pressed:
 		return
 	if _menu_mode or GameState.menu_paused or not GameState.running:
+		return
+	if button.button_index == MOUSE_BUTTON_WHEEL_UP:
+		_user_zoom = clampf(_user_zoom * 0.92, 0.55, 1.18)
+		get_viewport().set_input_as_handled()
+		return
+	elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		_user_zoom = clampf(_user_zoom * 1.08, 0.55, 1.18)
+		get_viewport().set_input_as_handled()
 		return
 	if button.button_index == MOUSE_BUTTON_LEFT:
 		_mouse_pos = button.position
@@ -1570,7 +1580,13 @@ func _on_spread_happened(from_id: String, to_id: String) -> void:
 		var dst: RegionView = _views[to_id]
 		dst.flash = 1.0
 	if to_id == RegionData.HERO_ID:
-		shake(0.2)
+		shake(0.35)
+	else:
+		shake(0.18)
+
+
+func _on_evolution_happened(_evo_id: String) -> void:
+	shake(0.85)
 
 
 func _on_toast(_text_key: String, _args: Dictionary, severity: int) -> void:

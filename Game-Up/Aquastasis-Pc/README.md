@@ -1,110 +1,100 @@
-# 🌊 PULSE OF THE MEDITERRANEAN (AQUASTASIS)
-### **COP31 Antalya — Akdeniz Ekosistem Savunması ("Tersine Salgın" Simülasyonu)**
+# 🌊 AQUASTASIS
+### **COP31 Antalya — Akdeniz Ekosistem Savunması**
 *GameUP Türkiye Oyun Hackathonu · COP31 Türkiye – Antalya Özel*
 
-![Godot 4](https://img.shields.io/badge/Engine-Godot_4.3+-478cbf?style=for-the-badge&logo=godot-engine&logoColor=white)
-![Zero Asset](https://img.shields.io/badge/Mimari-%25100_Prosed%C3%BCrel_(S%C4%B1f%C4%B1r_Harici_Varl%C4%B1k)-19e6c1?style=for-the-badge)
+![Godot 4](https://img.shields.io/badge/Engine-Godot_4.x-478cbf?style=for-the-badge&logo=godot-engine&logoColor=white)
+![Zero Asset](https://img.shields.io/badge/Mimari-%25100_Prosed%C3%BCrel_(S%C4%B1f%C4%B1r_Harici_Dosya)-19e6c1?style=for-the-badge)
 ![Languages](https://img.shields.io/badge/Dil-TR_%7C_EN_%7C_RU-e8a33d?style=for-the-badge)
-![Genre](https://img.shields.io/badge/T%C3%BCr-Strateji_%7C_Kriz_Sim%C3%BClasyonu-ff4d4d?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-Windows_(.exe)_%7C_Linux-2ea44f?style=for-the-badge)
 
 ---
 
-## 🎯 Proje Özeti ve İklim Konusuyla İlişkisi
+## 🎯 Oyun Özeti ve İklim Konusuyla İlişkisi
 
-**Pulse of the Mediterranean (Aquastasis)**, oyuncunun **COP31 Antalya Deniz Koalisyonu** lideri olarak Akdeniz havzasını 2026–2046 yılları arasında ekolojik çöküşten kurtarmaya çalıştığı, gerçek zamanlı bir ekolojik strateji ve kriz simülasyonudur.
+**AQUASTASIS**, oyuncunun **COP31 Antalya Deniz Koalisyonu** lideri olarak Akdeniz'i 2026–2046 yılları arasında ekolojik çöküşten kurtarmaya çalıştığı gerçek zamanlı bir strateji ve kriz simülasyon oyunudur.
 
-* **Odak Alan:** **Okyanuslar ve Denizler (COP31 Öncelikli Teması)**. Oyundaki tüm mekanikler, yükseltmeler ve olaylar doğrudan deniz ekosisteminin sağlığına bağlıdır.
-* **Oyuncu Rolü:** Antalya Körfezi merkezli COP31 Koalisyonu'nu yöneterek Bütçe, Siyasi Destek ve Bilim kaynaklarını dengeler; Akdeniz'in 8 kritik bölgesinde acil temizlik yapar (`[Q]`), deniz koruma devriyeleri kurar (`[W]`), halk farkındalık kampanyaları yürütür (`[E]`) ve 24 düğümlü Politika Ağacı (`[T]`) ile kalıcı reformları hayata geçirir.
-* **İklim Kriziyle İlişkisi:** Deniz suyu ısınması (`+1.5°C -> +4.0°C`), plastik kirliliği, asitlenme, aşırı avlanma, istilacı tür göçleri, mercan ağarması ve *Posidonia oceanica* deniz çayırlarının kaybı gibi gerçek iklim dinamiklerini simüle eder. Oyuncuya iklim krizinin yalnızca tek boyutlu müdahalelerle değil; bilim, koruma kalkanları, diplomasi ve toplumsal bilincin ortak sinerjisiyle aşılabileceğini gösterir.
+* **Oyuncu Ne Yapar?** Bütçe, Siyasi Destek ve Bilim kaynaklarını yöneterek Akdeniz'in 8 bölgesinde acil deniz temizliği yapar (`[Q]`), deniz koruma devriyeleri kurar (`[W]`), kamuoyu bilinçlendirme kampanyaları yürütür (`[E]`), 24 düğümlü Politika Ağacı'ndan çevre yasaları çıkarır (`[T]`) ve denizdeki veri baloncuklarını toplayarak kriz mutasyonlarına karşı bilimsel çözümler üretir.
+* **İklim Kriziyle İlişkisi:** Küresel ısınma (`+1.5°C -> +4.0°C`), deniz suyu asitlenmesi, Marmara müsilaj krizleri, mercan ağarması, *Posidonia* deniz çayırlarının kaybı ve bayrak türlerin (*Caretta caretta* ile *Akdeniz Foku*) neslinin tükenme tehlikesini birbirine bağlı canlı bir ekosistem simülasyonuna dönüştürür. Oyuncuya, iklim krizinin tek tip geçici müdahalelerle değil; **bilim, koruma kalkanları, uluslararası diplomasi ve toplumsal desteğin** dengeli birleşimiyle çözülebileceğini deneyimletir.
 
 ---
 
-## 🎮 Temel Mekanikler ve Oynanış
+## 🚀 Kurulumsuz Hemen Oyna (Windows & Godot)
 
-### 1. 🏛️ Antalya COP31 Karargah Kuralı & DEFCON Barometresi
-* **Antalya Körfezi**, koalisyonun ana komuta merkezidir. Haritada altın radar halkalarıyla vurgulanmıştır. Antalya'daki kriz seviyesi **%75** kritik eşiğini aşarsa koalisyon düşer ve simülasyon kaybedilir.
-* Akdeniz genelindeki ortalama kirlilik ve deniz suyu sıcaklığına göre **DEFCON 5 (Stabil) -> DEFCON 1 (Ekolojik Çöküş)** seviyeleri arasında dinamik kriz alarm sistemi çalışır.
+Bilgisayarınızda Godot Engine kurulu olmasına **gerek yoktur**:
 
-### 2. ⚡ Taktik Saha Operasyonları (`Q` / `W` / `E`)
-Haritadan herhangi bir deniz bölgesi seçildiğinde anlık operasyonlar devreye girer:
-* **`[Q]` Acil Temizlik Operasyonu (40 Bütçe):** Temizlik filolarıyla bölgedeki anlık kirliliği hızla düşürür.
-* **`[W]` Deniz Koruma Devriyesi (12 Siyasi Destek):** Kaçak avlanmayı ve atık deşarjını önler, **🛡️ Deniz Koruma Kalkanı (+20)** oluşturarak komşu bölgelerden kriz yayılımını sınırlar.
-* **`[E]` Farkındalık Kampanyası (20 Bütçe + 4 Siyasi Destek):** Kıyı halkını seferber eder, bölgede ve komşularında **📢 Halk Bilinci** seviyesini artırır, koruma kalkanının aşınmasını engeller ve haritada destek baloncukları üretir.
+1. **Doğrudan Çalıştırma (Windows):**
+   * Depoyu indirin (`Code -> Download ZIP`) veya klonlayın.
+   * Klasör içindeki **`Aquastasis.exe`** (veya **`oyunu_baslat.bat`**) dosyasına çift tıklayın (`Aquastasis.pck` aynı klasörde bulunmalıdır).
+2. **GitHub Releases Üzerinden İndirme:**
+   * Sağ taraftaki **[Releases](https://github.com/Ryubio/Aquastasis/releases)** bölümünden hazır paketi indirip tek tıkla başlatabilirsiniz.
+3. **Godot 4 Editörü ile Açma:**
+   * Godot 4.3+ ile `project.godot` dosyasını içe aktarın ve `F5` tuşuna basın.
+
+---
+
+## 🎮 Temel Mekanikler ve Özellikler
+
+### 1. 🏛️ Antalya COP31 Karargah Kuralı ve DEFCON Barometresi
+* **Antalya Körfezi**, koalisyonun komuta merkezidir. Haritada özel altın radar halkalarıyla işaretlenmiştir. Antalya'daki kriz seviyesi kritik eşiği (**%75**) aşarsa koalisyon çöker ve oyun kaybedilir.
+* Havzadaki ortalama kirlilik ve ısınmaya göre **DEFCON 5 (Güvenli) -> DEFCON 1 (Ekolojik Çöküş)** alarm sistemi devreye girer.
+
+### 2. ⚡ Taktik Saha Operasyonları (`Q` / `W` / `E`) ve Sinerji
+Herhangi bir deniz bölgesi seçildiğinde sağ panelden veya klavye kısayollarıyla 3 anlık operasyon yürütülür:
+* **`[Q]` Acil Temizlik Operasyonu (`40 Bütçe`):** Temizlik gemileriyle bölgedeki akut kirliliği anında düşürür.
+* **`[W]` Deniz Devriyesi (`12 Siyasi Destek`):** Kaçak deşarjı ve yasa dışı balıkçılığı durdurur (**-%1.5 anlık kirlilik**), **🛡️ Deniz Koruma Kalkanı (+20)** kurarak komşu bölgelerden gelen kriz yayılmasını bloke eder ve balık/fok popülasyonunu iyileştirir.
+* **`[E]` Farkındalık Kampanyası (`20 Bütçe + 4 Destek`):** Kıyı halkını temizliğe seferber eder (**-%2.0 anlık kirlilik**), seçili bölgede ve komşularında **📢 Halk Bilinci & Destek** seviyesini artırır, koruma kalkanının aşınmasını önler ve siyasi destek baloncukları üretir.
 
 ### 3. 🧬 Kriz DNA Evrimi ("Tersine Plague Inc." Dinamiği)
-* Kriz kendi adaptasyon mekanizmasına sahiptir. Oyuncu tek bir stratejiyi aşırı tekrarlarsa (ör. yalnızca temizlik operasyonları), kriz buna karşı **Direnç Mutasyonları** (*Mikroplastik Direnci, İstilacı Tür Baskını, Dezenformasyon Dalgası* vb.) geliştirir.
-* Bu dirençleri kırmak için **Politika Ağacı (`[T]`)** üzerinden karşı-politikalar benimsenmeli ve toplanan Bilim Puanları ile adaptif çözümler üretilmelidir.
+* Kriz kendi yapay zeka belleğine sahiptir. Oyuncu sürekli sadece tek bir stratejiyi (ör. yalnızca `[Q]` Temizlik) tekrarlarsa, kriz buna karşı **Direnç Mutasyonu** (*İstilacı Tür İstilası, Mikroplastik Direnci, Dezenformasyon Dalgaları* vb.) geliştirir.
+* Dirençleri kırmak için **Politika Ağacı (`[T]`)** üzerinden karşı-politikalar benimsenmeli veya Bilim Puanı ile **Karşı-Aşı Sentezi** yapılmalıdır.
 
-### 4. 🌳 Politika & Teknoloji Ağacı (4 Dal, 24 Düğüm)
-* **1. Deniz Koruma:** Deniz Koruma Alanları (MPA), Posidonia Restorasyonu, Mercan Fidanlıkları, Mavi Karbon, 30x30 Koruma Ağı.
-* **2. Kirlilik Kaynağını Kesme:** Tek Kullanımlık Plastik Yasağı, Gemi Atık Denetimi, Nehir Ağzı Filtreleri, Sıfır Atık Limanlar.
-* **3. Bilim ve Kamuoyu:** Uydu Takibi, Vatandaş Bilimi, Okul Müfredatı, Dezenformasyonla Mücadele, Biyo-Enzimler.
-* **4. Ekonomi ve Diplomasi:** Sürdürülebilir Balıkçılık Kotaları, Yeşil Turizm Etiketi, Bölgesel COP Antlaşması, Karbon Fiyatlandırması.
+### 4. 🌳 Politika Ağacı (4 Dal, 24 Düğüm) & Bilim Projeleri
+* **Deniz Koruma:** Deniz Koruma Alanları (MPA), Posidonia Restorasyonu, Mercan Fidanlıkları, Mavi Karbon Borsası, 30x30 Okyanus Ağı.
+* **Kirlilik Kaynağı Kesme:** Tek Kullanımlık Plastik Yasağı, Gemi Atık Denetimi, Nehir Ağzı Filtreleri, Sıfır Atık Limanlar.
+* **Bilim ve Kamuoyu:** Uydu Takibi, Vatandaş Bilimi, Okul Müfredatı, Dezenformasyonla Mücadele, Biyo-Enzimler.
+* **Ekonomi ve Diplomasi:** Sürdürülebilir Balıkçılık Kotaları, Yeşil Turizm Etiketi, Akdeniz Bölgesel Antlaşması, Karbon Fiyatlandırması.
 
-### 5. 🌊 Akdeniz Bölgeleri ve Veri Baloncukları
-* **8 Canlı Bölge:** Alboran Denizi, Batı Akdeniz, Tiren Denizi, Adriyatik, İyon Denizi, Ege Denizi, Marmara Denizi, Doğu Akdeniz (Antalya HQ).
-* Harita üzerinde periyodik olarak beliren **Bilim (Camgöbeği)** ve **Siyasi Destek (Kehribar)** baloncukları toplanarak yeni politikaların kilidi açılır.
+### 5. 🐢 Biyoçeşitlilik ve COP31 Liderler Zirveleri
+* **Bayrak Türler:** Antalya ve Ege'de kirlilik düştükçe **Caretta caretta** yuvaları; Marmara ve Adriyatik'te koruma alanları arttıkça **Akdeniz Foku (*Monachus monachus*)** nüfusu çoğalır.
+* **5 Yıllık Zirveler (2031, 2036, 2041):** Her 5 yılda bir toplanan COP31 Zirvesi'nde koalisyonun karnesi değerlendirilir; başarı durumunda Yeşil İklim Fonu hibeleri, başarısızlıkta ise endüstriyel lobi baskılarıyla yüzleşilir.
 
 ---
 
 ## ⌨️ Kontroller ve Kısayollar
 
-| Tuş / Eylem | İşlev |
+| Tuş / Eylem | Açıklama |
 | :--- | :--- |
-| **Sol Tık (Deniz Bölgesi)** | Bölge seçimi ve Bölge Denetçisi detay panelini açma |
-| **Sol Tık (Baloncuklar)** | Haritada beliren **Bilim** ve **Siyasi Destek** baloncuklarını toplama |
-| **`Q`** | Seçili bölgede **Acil Temizlik Operasyonu** başlatma |
-| **`W`** | Seçili bölgede **Deniz Devriyesi / Koruma Kalkanı** kurma |
-| **`E`** | Seçili bölgede **Farkındalık Kampanyası** başlatma |
-| **`T`** | **Politika ve Teknoloji Ağacı** penceresini aç/kapat |
+| **Sol Tık (Deniz Bölgesi)** | Bölge seçimi ve Bölge Denetçisi'ni açma |
+| **Sol Tık (Baloncuklar)** | Haritada yüzen **Bilim (Camgöbeği)** ve **Siyasi Destek (Kehribar)** balonlarını toplama |
+| **`Q` / `W` / `E`** | Seçili bölgede: `[Q]` Acil Temizlik · `[W]` Deniz Devriyesi · `[E]` Farkındalık Kampanyası |
+| **`T`** | Politika & Teknoloji Ağacı penceresini aç/kapat |
+| **`H` veya `[?]` Butonu** | COP31 Akdeniz Harekat Kılavuzu'nu aç/kapat |
 | **`Boşluk (Space)`** | Simülasyonu Duraklat / Devam Ettir |
 | **`1` / `2` / `3`** | Zaman akış hızı (`1x` / `2x` / `4x`) |
-| **`ESC`** | Pencereleri kapat / Duraklatma menüsü |
+| **`ESC`** | Açık pencereleri kapat / Duraklatma ve Ses Ayarları menüsü |
 
 ---
 
-## 🚀 Çalıştırma ve Kurulum
+## 🛠️ Teknik Mimari (%100 Kod Tabanlı / Sıfır Harici Varlık)
 
-### Yöntem 1: Doğrudan Başlatma (Windows)
-1. Proje klasöründeki **`oyunu_baslat.bat`** betiğine çift tıklayarak oyunu başlatabilirsiniz.
+Proje, dışarıdan hiçbir görsel (`.png`, `.svg`), ses (`.wav`, `.mp3`) veya 3B model (`.glb`) dosyası kullanmadan **%100 GDScript ve GLSL Shader koduyla** inşa edilmiştir:
 
-### Yöntem 2: Godot Editörü ile Açma
-1. Bilgisayarınızda **Godot 4.3+** (Forward+ renderer önerilir) kurulu olduğundan emin olun.
-2. Godot Proje Yöneticisi'nden **İçe Aktar (Import)** seçeneğini tıklayın.
-3. `Game-Up/project.godot` dosyasını seçip projeyi açın ve `F5` tuşuna basın.
-
-### Yöntem 3: Konsoldan Otomatik Denge / Doğrulama Testi (Headless)
-Simülasyon motorunu ve kod bütünlüğünü konsol üzerinden test etmek için:
-```bash
-# Kod derleme ve tip güvenliği kontrolü
-godot --headless --path . res://tools/check.tscn
-
-# 1000 tick otomatik simülasyon ve denge testi
-godot --headless --path . -s res://scripts/sim_test.gd
-```
+* **Prosedürel 3B Akdeniz Haritası (`scripts/map_builder.gd`):** 8 deniz bölgesi çokgen verilerinden `Geometry2D.triangulate_polygon()` ve `SurfaceTool` ile gerçek zamanlı 3B mesh olarak üretilir.
+* **Özel Deniz & Atmosfer Shader'ları (`shaders/`):** Her bölgenin kirlilik ve sağlık değerine göre dalga genliği, biyolüminesans parıltısı, kostik su altı ışıkları ve Marmara müsilaj partikülleri gerçek zamanlı hesaplanır.
+* **Prosedürel Ses Sentezleyici (`scripts/audio_synth.gd`):** `AudioStreamGenerator` kullanılarak 48 Hz derin okyanus uğultusu, 750 Hz denizaltı sonar pingi, mekanik terminal klikleri, su baloncuğu sesleri, DEFCON sireni ve ekosistem kalp atışı matematiksel dalgalarla sentezlenir.
+* **Vektörel İkon Motoru (`scripts/icons.gd`):** Tüm teknoloji ağacı, kaynak, kaplumbağa/fok ve arayüz ikonları `_draw()` API'si ile çizilir.
+* **3 Dil Desteği (`scripts/i18n*.gd`):** Türkçe, İngilizce ve Rusça tam yerelleştirme (canlı dil değiştirme destekli).
+* **Otomatik Doğrulama ve Monte Carlo Test Süiti:**
+  * Derleme ve tip kontrolü: `godot --headless --path . res://tools/check.tscn`
+  * Denge testi: `godot --headless --path . -s res://scripts/sim_test.gd`
+  * 8 oyuncu arketipi x 10 tohum (80 tam oyun) simülasyonu: `godot --headless --path . -s res://scripts/monte_carlo_50.gd`
 
 ---
 
-## 🛠️ Teknik Mimari (%100 Prosedürel / Sıfır Harici Dosya)
+## 🌍 English Summary (For International Jury)
 
-Proje, harici hiçbir görsel (`.png`, `.jpg`, `.svg`), ses veya 3B model (`.glb`) dosyasına bağımlı kalmadan, **tümüyle GDScript ve özel GLSL Shader kodlarıyla** oluşturulmuştur:
+**AQUASTASIS** is a real-time ecological strategy and reverse-pandemic simulation game built in **Godot 4** for the **GameUP Türkiye Game Hackathon (COP31 Türkiye – Antalya Special)**.
 
-* **Prosedürel 3B Akdeniz Haritası (`scripts/map_builder.gd`):** Gerçek koordinatlardan türetilen 8 deniz bölgesinin çokgenleri `Geometry2D.triangulate_polygon()` ve `SurfaceTool` ile gerçek zamanlı 3B mesh'e dönüştürülür.
-* **Özel GLSL Shader'lar (`shaders/`):** 
-  * `sea.gdshader`: Bölgenin kirlilik ve sağlık indeksine göre su rengi, dalga genliği ve kriz yayılım şok dalgaları gerçek zamanlı hesaplanır.
-  * `route.gdshader`: Deniz ticaret rotaları ve akıntı hatları shader seviyesinde canlandırılır.
-  * `grid.gdshader`: Sayısal okyanus koordinat ızgarası dinamik olarak çizilir.
-* **Vektörel İkon Motoru (`scripts/icons.gd`):** Tüm teknoloji ağacı, kaynak ve arayüz ikonları Godot'nun 2B vektörel çizim API'si (`_draw()`) kullanılarak koddan üretilir.
-* **3 Dil Canlı Yerelleştirme (`scripts/i18n*.gd`):** Türkçe, İngilizce ve Rusça tam dil desteği. Arayüz elemanları `EventBus.language_changed` sinyaliyle oyundan çıkmadan anlık olarak güncellenir.
-* **Yapay Zeka Olay ve Simülasyon Motoru (`scripts/crisis_sim.gd`, `scripts/game_state.gd`):** Bölgesel akıntılar, sıcaklık katsayıları ve kriz direnç evrimleri deterministik matematik modelleriyle yönetilir.
-
----
-
-## 🌍 English Summary (For International Jury - UNDP & ICPSD)
-
-**PULSE OF THE MEDITERRANEAN (AQUASTASIS)** is an ecological real-time strategy and reverse-pandemic simulation game developed in **Godot 4** for the **GameUP Türkiye Game Hackathon (COP31 Türkiye – Antalya Special)**.
-
-* **Core Premise:** The player takes command of the **COP31 Mediterranean Marine Coalition** headquartered in Antalya Gulf. Between 2026 and 2046, the coalition must prevent systemic ecological collapse across 8 interconnected Mediterranean maritime zones.
-* **The "Reverse Plague Inc." Engine:** Unlike passive simulations, the marine crisis possesses an adaptive memory. If the player relies disproportionately on single-dimensional remedies (e.g. repetitive cleanup spams), the crisis develops biological and social **Resistance Mutations** (invasive species surges, microplastic tolerance, disinformation campaigns).
-* **Strategic Triad:** Players balance **Budget, Political Support, and Science Points** to run localized tactical responses (`[Q]` Cleanup, `[W]` Marine Patrols that erect crisis-blocking Protection Shields, `[E]` Civic Awareness), harvest floating data bubbles, and ratify 24 structural reforms in the **Policy Tree (`[T]`)**.
-* **Zero-Asset Architecture:** 100% of coastline geometry, multi-layered maritime shaders, and vector interface icons are procedurally generated strictly in code, featuring seamless on-the-fly language switching for **Turkish, English, and Russian**.
+* **Player Role:** As the commander of the **COP31 Mediterranean Marine Coalition** headquartered in Antalya Gulf, you must halt a spreading Marine Health Crisis across 8 Mediterranean regions between 2026 and 2046.
+* **Core Loop:** Balance **Budget, Political Support, and Science Points** to execute local field operations (`[Q]` Emergency Cleanup, `[W]` Marine Patrols that build a spread-blocking Protection Shield, `[E]` Civic Awareness Campaigns), adopt 24 structural laws in the **Policy Tree (`[T]`)**, and counter adaptive **Crisis DNA Mutations** before global warming hits `+4.0°C` or Antalya HQ collapses.
+* **Zero-Asset Engineering:** 100% of the 3D coastline meshes, spatial sea shaders, vector icons, and real-time synthesized audio (`AudioStreamGenerator`) are generated purely from code with zero external asset files, supporting **Turkish, English, and Russian** out of the box.

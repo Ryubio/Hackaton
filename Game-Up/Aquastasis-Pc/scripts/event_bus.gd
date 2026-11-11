@@ -39,3 +39,9 @@ signal bubble_expired(bubble_id: int)
 signal news(text_key: String, args: Dictionary, tone: int)
 signal tree_toggle_requested()                           # any view asks main.gd to open/close the tree
 signal tree_toggled(is_open: bool)                       # the tree modal opened / closed
+signal summit_triggered(summit_data: Dictionary)
+signal summit_resolved(choice_idx: int)
+signal tutorial_requested()
+signal pause_menu_requested()
+signal achievement_unlocked(ach_id: String)
+signal difficulty_changed(diff_id: String)
