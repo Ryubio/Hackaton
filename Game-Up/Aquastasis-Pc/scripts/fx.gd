@@ -11,7 +11,8 @@ const RegionData := preload("res://scripts/region.gd")
 
 ## Screen area bubbles may use at 1920x1080: the map between the HUD panels (docs 11.9).
 const MAP_RECT := Rect2(380.0, 112.0, 1100.0, 920.0)
-const HIT_RADIUS := 28.0
+const HIT_RADIUS := 32.0
+const HOVER_COLLECT_TIME := 0.08
 const RADIUS := {"science": 21.0, "political": 23.0, "budget": 23.0}
 const ICON_PX := 24.0
 const PING_PERIOD := 2.6         # seconds between sonar pings of a waiting bubble
@@ -20,12 +21,11 @@ const PING_PERIOD := 2.6         # seconds between sonar pings of a waiting bubb
 const RINGS := [[64.0, 54.0], [96.0, 78.0], [132.0, 104.0]]
 const RING_STEPS := 12
 ## Map labels as seen at the gameplay framing: the name (1-2 lines, wraps at ~21 chars)
-## sits above the anchor, the status word below it. Antalya's label is nudged east and the
-## hero "ANTALYA · COP31" beacon label floats above the gulf.
+## sits above the anchor, the status word below it. The selected HQ beacon label floats above HQ.
 const LABEL_CHAR_W := 11.7
 const LABEL_WRAP_CHARS := 21
 const LABEL_LINE_H := 25.0
-const LABEL_NUDGE := {"antalya": Vector2(44.0, -4.0)}
+const LABEL_NUDGE := {}
 const HERO_LABEL_OFFSET := Vector2(29.0, -115.0)
 const HERO_LABEL_SIZE := Vector2(196.0, 30.0)
 ## HUD top bar resource icons: distance from the right screen edge (right-aligned row).
@@ -48,6 +48,12 @@ var _time: float = 0.0
 var _had_effects: bool = false
 var _rng := RandomNumberGenerator.new()
 
+# Visual Showpieces & Ambient Species
+var _victory_wave: float = -1.0
+var _algal_pollution: float = 0.0
+var _turtle_count: int = 0
+var _seal_count: int = 0
+
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -58,6 +64,8 @@ func _ready() -> void:
 	EventBus.bubble_collected.connect(_on_bubble_collected)
 	EventBus.tick_done.connect(_on_tick_done)
 	EventBus.language_changed.connect(_on_language_changed)
+	EventBus.game_over.connect(_on_game_over)
+	EventBus.region_changed.connect(_on_region_changed)
 
 
 ## Removes every bubble immediately (new game, main menu, game over).
@@ -69,6 +77,7 @@ func clear_all() -> void:
 	_bursts.clear()
 	_comets.clear()
 	_arrivals.clear()
+	_victory_wave = -1.0
 	queue_redraw()
 
 
@@ -107,6 +116,7 @@ func _on_bubble_spawned(bubble: Dictionary) -> void:
 		"fade": 0.0,
 		"hover": 0.0,
 		"hovered": false,
+		"hover_t": 0.0,
 		"life": 1.0,
 		"bob": 0.0,
 		"pos": Vector2.ZERO,
@@ -143,6 +153,19 @@ func _on_bubble_collected(bubble_id: int, kind: String, amount: float) -> void:
 
 func _on_tick_done(snapshot: Dictionary) -> void:
 	_tick = int(snapshot.get("tick", _tick))
+	_turtle_count = int(snapshot.get("turtle_nests", 0))
+	_seal_count = int(snapshot.get("monk_seals", 0))
+
+
+func _on_game_over(won: bool, _reason: String, _stats: Dictionary) -> void:
+	if won:
+		_victory_wave = 0.0
+		queue_redraw()
+
+
+func _on_region_changed(region_id: String, data: Dictionary) -> void:
+	if region_id == "east_asian":
+		_algal_pollution = float(data.get("pollution", 0.0))
 
 
 func _on_language_changed(_lang: String) -> void:
@@ -274,8 +297,9 @@ func _label_rects(anchors: Dictionary) -> Array:
 		var w: float = float(mini(chars, LABEL_WRAP_CHARS)) * LABEL_CHAR_W + 10.0
 		var c: Vector2 = a + LABEL_NUDGE.get(region_id, Vector2.ZERO)
 		out.append(Rect2(c.x - w * 0.5, c.y - LABEL_LINE_H * float(lines) - 2.0, w, LABEL_LINE_H * float(lines) + 22.0))
-	if anchors.has(RegionData.HERO_ID):
-		var h: Vector2 = anchors[RegionData.HERO_ID]
+	var hq_id: String = GameState.hq_region if RegionData.DEFS.has(GameState.hq_region) else RegionData.HERO_ID
+	if anchors.has(hq_id):
+		var h: Vector2 = anchors[hq_id]
 		var hc: Vector2 = h + HERO_LABEL_OFFSET
 		out.append(Rect2(hc - HERO_LABEL_SIZE * 0.5, HERO_LABEL_SIZE))
 	return out
@@ -283,12 +307,7 @@ func _label_rects(anchors: Dictionary) -> Array:
 
 # --- Input ------------------------------------------------------------------------------------
 
-func _on_bubble_input(event: InputEvent, node: Control) -> void:
-	var mb := event as InputEventMouseButton
-	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
-		return
-	node.accept_event()
-	var id: int = int(node.get_meta("bid", -1))
+func _collect_bubble_by_id(id: int) -> void:
 	if not _recs.has(id):
 		return
 	var rec: Dictionary = _recs[id]
@@ -299,12 +318,22 @@ func _on_bubble_input(event: InputEvent, node: Control) -> void:
 		_start_dying(_recs[id], "stale")
 
 
+func _on_bubble_input(event: InputEvent, node: Control) -> void:
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+		return
+	node.accept_event()
+	_collect_bubble_by_id(int(node.get_meta("bid", -1)))
+
+
 func _on_bubble_hover(node: Control, on: bool) -> void:
 	var id: int = int(node.get_meta("bid", -1))
 	if not _recs.has(id):
 		return
 	var rec: Dictionary = _recs[id]
 	rec["hovered"] = on and str(rec["state"]) == "alive"
+	if not on:
+		rec["hover_t"] = 0.0
 	if on:
 		move_child(node, get_child_count() - 1)   # hovered bubble and its label draw on top
 
@@ -315,7 +344,16 @@ func _process(delta: float) -> void:
 	_time += delta
 	var proj: Dictionary = {}   # region -> projected anchor (one projection per region per frame)
 	for id in _recs.keys():
+		if not _recs.has(id):
+			continue
 		var rec: Dictionary = _recs[id]
+		if bool(rec.get("hovered", false)) and str(rec["state"]) == "alive" and GameState.running and not GameState.menu_paused:
+			rec["hover_t"] = float(rec.get("hover_t", 0.0)) + delta
+			if float(rec["hover_t"]) >= HOVER_COLLECT_TIME:
+				_collect_bubble_by_id(int(id))
+				if not _recs.has(id):
+					continue
+				rec = _recs[id]
 		var region: String = rec["region"]
 		if not proj.has(region):
 			proj[region] = _anchor(region)
@@ -345,7 +383,12 @@ func _process(delta: float) -> void:
 		a["t"] = float(a["t"]) + delta / 0.45
 		if float(a["t"]) >= 1.0:
 			_arrivals.remove_at(i)
-	var has_effects: bool = not _bursts.is_empty() or not _comets.is_empty() or not _arrivals.is_empty()
+	if _victory_wave >= 0.0:
+		_victory_wave += delta * 0.75
+		if _victory_wave > 3.5:
+			_victory_wave = -1.0
+	var has_ambient: bool = (_victory_wave >= 0.0) or (_algal_pollution >= 60.0) or (_turtle_count > 0) or (_seal_count > 0)
+	var has_effects: bool = not _bursts.is_empty() or not _comets.is_empty() or not _arrivals.is_empty() or has_ambient
 	if has_effects or _had_effects:
 		queue_redraw()   # one extra frame after the last effect clears the canvas
 	_had_effects = has_effects
@@ -510,6 +553,9 @@ func _text_centered(ci: CanvasItem, font: Font, text: String, at: Vector2, fs: i
 
 
 func _draw() -> void:
+	_draw_species_silhouettes()
+	_draw_algal_bloom()
+	_draw_victory_wave()
 	for b in _bursts:
 		_draw_burst(b)
 	for c in _comets:
@@ -521,6 +567,74 @@ func _draw() -> void:
 		var p: Vector2 = arr["pos"]
 		draw_arc(p, 6.0 + 22.0 * _ease_out(t), 0.0, TAU, 32, UITheme.with_alpha(col.lerp(Color.WHITE, 0.3), 1.0 - t), 2.0, true)
 		draw_circle(p, 5.0 * (1.0 - t), UITheme.with_alpha(Color.WHITE, 0.8 * (1.0 - t)))
+
+
+func _draw_species_silhouettes() -> void:
+	var hq_id: String = GameState.hq_region if RegionData.DEFS.has(GameState.hq_region) else RegionData.HERO_ID
+	if _turtle_count > 0:
+		var hq_pos := _anchor(hq_id)
+		var p1 := hq_pos + Vector2(-45.0 + sin(_time * 0.5) * 35.0, 25.0 + cos(_time * 0.4) * 18.0)
+		_draw_turtle(p1, 0.35 + 0.1 * sin(_time * 2.0))
+		var ct_pos := _anchor("coral_triangle")
+		var p2 := ct_pos + Vector2(25.0 + cos(_time * 0.45) * 40.0, 30.0 + sin(_time * 0.6) * 20.0)
+		_draw_turtle(p2, 0.30 + 0.1 * cos(_time * 1.8))
+	if _seal_count > 0:
+		var med_pos := _anchor("mediterranean")
+		var sp1 := med_pos + Vector2(cos(_time * 0.5) * 40.0, sin(_time * 0.35) * 22.0)
+		_draw_seal(sp1, 0.35 + 0.1 * sin(_time * 1.5))
+
+
+func _draw_turtle(pos: Vector2, alpha: float) -> void:
+	var col := UITheme.with_alpha(UITheme.HEALTHY, alpha)
+	var col_bright := UITheme.with_alpha(UITheme.HEALTHY.lerp(Color.WHITE, 0.5), alpha * 1.3)
+	draw_set_transform(pos, sin(_time * 0.6) * 0.2, Vector2(1.2, 0.9))
+	draw_circle(Vector2.ZERO, 9.0, col)
+	draw_arc(Vector2.ZERO, 9.0, 0.0, TAU, 16, col_bright, 1.5, true)
+	# Flippers
+	draw_line(Vector2(-6, -4), Vector2(-13, -10), col_bright, 2.0, true)
+	draw_line(Vector2(6, -4), Vector2(13, -10), col_bright, 2.0, true)
+	draw_line(Vector2(-5, 6), Vector2(-11, 11), col_bright, 1.5, true)
+	draw_line(Vector2(5, 6), Vector2(11, 11), col_bright, 1.5, true)
+	# Head
+	draw_circle(Vector2(0, -11), 3.0, col_bright)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_seal(pos: Vector2, alpha: float) -> void:
+	var col := UITheme.with_alpha(UITheme.SCIENCE_BLUE, alpha)
+	var col_bright := UITheme.with_alpha(UITheme.SCIENCE_BLUE.lerp(Color.WHITE, 0.5), alpha * 1.3)
+	draw_set_transform(pos, cos(_time * 0.5) * 0.3, Vector2(1.6, 0.7))
+	draw_circle(Vector2.ZERO, 10.0, col)
+	draw_arc(Vector2.ZERO, 10.0, 0.0, TAU, 16, col_bright, 1.5, true)
+	# Tail fin
+	draw_line(Vector2(10, 0), Vector2(16, -5), col_bright, 1.5, true)
+	draw_line(Vector2(10, 0), Vector2(16, 5), col_bright, 1.5, true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_algal_bloom() -> void:
+	if _algal_pollution < 60.0:
+		return
+	var m_pos := _anchor("east_asian") + Vector2(12.0, -8.0)
+	var intensity := clampf((_algal_pollution - 60.0) / 40.0, 0.1, 1.0)
+	var col := Color(0.88, 0.76, 0.38, 0.38 * intensity)
+	for k in 4:
+		var ang: float = _time * 0.9 + float(k) * (TAU / 4.0)
+		var rad: float = 24.0 + sin(_time * 1.8 + float(k)) * 6.0
+		draw_arc(m_pos, rad, ang, ang + 1.25, 16, col, 3.0, true)
+		draw_circle(m_pos + Vector2(cos(ang), sin(ang)) * (rad * 0.8), 4.5 * intensity, col)
+
+
+func _draw_victory_wave() -> void:
+	if _victory_wave < 0.0:
+		return
+	var hq_id: String = GameState.hq_region if RegionData.DEFS.has(GameState.hq_region) else RegionData.HERO_ID
+	var c := _anchor(hq_id)
+	var r := _victory_wave * 550.0
+	var fade := clampf(1.0 - _victory_wave / 3.2, 0.0, 1.0)
+	draw_arc(c, r, 0.0, TAU, 72, UITheme.with_alpha(UITheme.HEALTHY, 0.8 * fade), 6.0, true)
+	draw_arc(c, r * 0.75, 0.0, TAU, 56, UITheme.with_alpha(UITheme.SCIENCE_BLUE, 0.6 * fade), 3.5, true)
+	draw_arc(c, r * 0.45, 0.0, TAU, 40, UITheme.with_alpha(Color.WHITE, 0.45 * fade), 2.0, true)
 
 
 func _draw_burst(b: Dictionary) -> void:

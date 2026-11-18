@@ -9,19 +9,20 @@ const TechTree := preload("res://scripts/tech_tree.gd")
 
 const PANEL_SIZE := Vector2(1220.0, 680.0)
 const PAD := 16.0
-const BODY_Y := 122.0
+const BODY_Y := 126.0
 const STRIP_H := 0.0
 const STRIP_GAP := 0.0
 const DETAILS_W := 420.0
 const GAP := 14.0
-const TABS_H := 46.0
+const TABS_H := 50.0
 const COL_HEAD_H := 40.0
-const TILE := Vector2(150.0, 106.0)
+const TILE := Vector2(212.0, 110.0)
 const TILE_ICON := 48.0
-const TILE_DX := 160.0
+const TILE_DX := 128.0
 const CHAMFER := 12.0
 const ADOPT_AREA_H := 76.0
-const STRIP_LEFT_W := 900.0
+const STRIP_LEFT_W := 620.0
+const TAB_CRISIS := "crisis_projects"
 const MAX_CHIPS := 2
 const RES_ORDER := ["budget", "political", "science"]
 const RES_KEYS := {"budget": "hud.budget", "political": "hud.political", "science": "hud.science"}
@@ -37,7 +38,7 @@ const STATE_KEYS := {
 	"affordable": "ui.tree.state.affordable",
 	"adopted": "ui.tree.state.adopted",
 }
-const NAME_SIZES := [15, 14, 13, 12]
+const NAME_SIZES := [18, 17, 16, 15]
 const DESC_SIZES := [17, 16, 15]
 const FACT_SIZES := [15, 14, 13]
 
@@ -73,6 +74,8 @@ var _close_btn: Button
 var _close_row: HBoxContainer
 var _active_branch: String = "protect"
 var _branch_tabs: Dictionary = {}
+var _branch_tab_icons: Dictionary = {}
+var _branch_tab_labels: Dictionary = {}
 var _tabs_row: HBoxContainer
 
 # Columns and tiles
@@ -124,10 +127,11 @@ var _evo_vals: Dictionary = {}      # branch -> Label
 var _evo_shown: Dictionary = {}     # branch -> float (animated share)
 var _pressure: Dictionary = {}
 var _active: Array = []
-var _resist_box: HBoxContainer
+var _resist_box: VBoxContainer
 var _resist_none: Label
 var _resist_more: Label
 var _resist_sig: String = ""
+var _crisis_split_x: float = 656.0
 
 # Repeatable Science Projects
 var _proj_algae_btn: Button
@@ -310,6 +314,8 @@ func _on_btn_down(btn: BaseButton) -> void:
 # --- Data helpers -----------------------------------------------------------------------
 
 func _branch_color(branch: String) -> Color:
+	if branch == TAB_CRISIS:
+		return UITheme.CRISIS if not _active.is_empty() else UITheme.SCIENCE_BLUE
 	var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
 	match str(info.get("color", "")):
 		"healthy":
@@ -354,8 +360,8 @@ func _body_h() -> float:
 
 
 func _tier_y(tier: int) -> float:
-	var top: float = COL_HEAD_H + 6.0
-	var area: float = _body_h() - top - 4.0
+	var top: float = 10.0
+	var area: float = _body_h() - top - 10.0
 	return top + area * ((float(tier) - 0.5) / 4.0)
 
 
@@ -467,10 +473,21 @@ func _build() -> void:
 	_layout()
 
 
+func _target_scale() -> float:
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var avail := Vector2(maxf(320.0, size.x - safe.x - safe.z - 16.0), maxf(240.0, size.y - safe.y - safe.w - 16.0))
+	return minf(1.0, minf(avail.x / PANEL_SIZE.x, avail.y / PANEL_SIZE.y))
+
+
 func _layout() -> void:
 	if _panel == null:
 		return
-	_panel.position = ((size - PANEL_SIZE) * 0.5).floor()
+	var safe: Vector4 = UITheme.safe_insets(get_viewport())
+	var safe_center := Vector2(safe.x + (size.x - safe.x - safe.z) * 0.5, safe.y + (size.y - safe.y - safe.w) * 0.5)
+	_panel.position = (safe_center - PANEL_SIZE * 0.5).floor()
+	if _anim == null or not _anim.is_running():
+		var ts: float = _target_scale()
+		_panel.scale = Vector2(ts, ts)
 	_backdrop.queue_redraw()
 
 
@@ -537,40 +554,68 @@ func _build_tabs() -> void:
 	_tabs_row.size = Vector2(PANEL_SIZE.x - PAD * 2.0, TABS_H)
 	_panel.add_child(_tabs_row)
 
-	var tab_icons := {
-		"protect": "🛡️ ",
-		"source": "🚫 ",
-		"science": "🔬 ",
-		"economy": "⚖️ ",
-	}
+	_branch_tabs.clear()
+	_branch_tab_icons.clear()
+	_branch_tab_labels.clear()
+
+	var tab_defs: Array = []
 	for b in TechTree.BRANCHES:
-		var branch: String = b
+		tab_defs.append(b)
+	tab_defs.append(TAB_CRISIS)
+
+	for td in tab_defs:
+		var branch: String = str(td)
+		var is_crisis: bool = (branch == TAB_CRISIS)
 		var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
 		var btn := Button.new()
 		btn.theme_type_variation = &"ChipButton"
-		btn.custom_minimum_size = Vector2((PANEL_SIZE.x - PAD * 2.0 - 24.0) / 4.0, TABS_H)
+		btn.custom_minimum_size = Vector2((PANEL_SIZE.x - PAD * 2.0 - 32.0) / float(tab_defs.size()), TABS_H)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.mouse_filter = Control.MOUSE_FILTER_STOP
 		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		btn.text = str(tab_icons.get(branch, "")) + I18n.t(str(info.get("name_key", "")))
-		btn.add_theme_font_override("font", UITheme.mono_bold_font())
-		btn.add_theme_font_size_override("font_size", 18)
+		btn.text = ""
 		_wire_button(btn)
 		btn.pressed.connect(_switch_branch.bind(branch))
 		_tabs_row.add_child(btn)
 		_branch_tabs[branch] = btn
 
+		var center_box := CenterContainer.new()
+		center_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		center_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		btn.add_child(center_box)
+
+		var row := _hbox(8)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		center_box.add_child(row)
+
+		var ic := Icons.new()
+		ic.setup("evolution" if is_crisis else "branch_" + branch, UITheme.TEXT_DIM, 20.0)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(ic)
+		_branch_tab_icons[branch] = ic
+
+		var lbl := Label.new()
+		lbl.text = I18n.t("ui.tree.tab.crisis_projects" if is_crisis else str(info.get("name_key", "")))
+		lbl.add_theme_font_override("font", UITheme.mono_bold_font())
+		lbl.add_theme_font_size_override("font_size", 15)
+		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(lbl)
+		_branch_tab_labels[branch] = lbl
+
 	_update_branch_tabs()
 
 
 func _switch_branch(branch: String) -> void:
-	if not TechTree.BRANCHES.has(branch):
+	if not TechTree.BRANCHES.has(branch) and branch != TAB_CRISIS:
 		return
 	_active_branch = branch
 	AudioSynth.play_click()
 	GameState.vibrate_light()
 	_update_branch_tabs()
 	_update_tiles_visibility()
+	if branch == TAB_CRISIS:
+		_refresh_strip()
+		return
 	_build_links()
 	_links.queue_redraw()
 	if _branch_of(_selected_id) != _active_branch:
@@ -591,28 +636,50 @@ func _switch_branch(branch: String) -> void:
 
 
 func _update_branch_tabs() -> void:
+	var all_tabs: Array = []
 	for b in TechTree.BRANCHES:
-		var btn: Button = _branch_tabs.get(b, null)
+		all_tabs.append(b)
+	all_tabs.append(TAB_CRISIS)
+	for b in all_tabs:
+		var bs: String = str(b)
+		var btn: Button = _branch_tabs.get(bs, null)
 		if btn == null:
 			continue
-		var is_active: bool = (str(b) == _active_branch)
-		var bcol: Color = _branch_color(str(b))
+		var is_active: bool = (bs == _active_branch)
+		var bcol: Color = _branch_color(bs)
+		var ic: Icons = _branch_tab_icons.get(bs, null)
+		var lbl: Label = _branch_tab_labels.get(bs, null)
 		var sb: StyleBoxFlat
 		if is_active:
 			sb = UITheme.panel_box(bcol, UITheme.with_alpha(bcol, 0.28), 2, UITheme.with_alpha(bcol, 0.35), 14, 10)
-			btn.add_theme_color_override("font_color", Color.WHITE)
+			if ic != null:
+				ic.color = bcol
+			if lbl != null:
+				lbl.add_theme_color_override("font_color", Color.WHITE)
 		else:
-			sb = UITheme.panel_box(UITheme.LINE_DIM, UITheme.with_alpha(UITheme.DEEP, 0.65), 1, Color(0, 0, 0, 0), 0, 10)
-			btn.add_theme_color_override("font_color", UITheme.TEXT_DIM)
+			var warn_crisis: bool = (bs == TAB_CRISIS and not _active.is_empty())
+			var edge_col: Color = UITheme.with_alpha(UITheme.CRISIS, 0.7) if warn_crisis else UITheme.LINE_DIM
+			sb = UITheme.panel_box(edge_col, UITheme.with_alpha(UITheme.DEEP, 0.65), 1, Color(0, 0, 0, 0), 0, 10)
+			if ic != null:
+				ic.color = UITheme.CRISIS if warn_crisis else UITheme.TEXT_DIM
+			if lbl != null:
+				lbl.add_theme_color_override("font_color", UITheme.CRISIS.lerp(Color.WHITE, 0.25) if warn_crisis else UITheme.TEXT_DIM)
 		btn.add_theme_stylebox_override("normal", sb)
 		btn.add_theme_stylebox_override("hover", sb)
 		btn.add_theme_stylebox_override("pressed", sb)
 
 
 func _update_tiles_visibility() -> void:
+	var show_tree: bool = (_active_branch != TAB_CRISIS)
+	if _canvas != null:
+		_canvas.visible = show_tree
+	if _details != null:
+		_details.visible = show_tree
+	if _strip != null:
+		_strip.visible = not show_tree
 	for id in _tiles.keys():
 		var tile: Control = _tiles[id]
-		var in_b: bool = (_branch_of(id) == _active_branch)
+		var in_b: bool = show_tree and (_branch_of(id) == _active_branch)
 		tile.visible = in_b
 		tile.mouse_filter = Control.MOUSE_FILTER_STOP if in_b else Control.MOUSE_FILTER_IGNORE
 
@@ -643,8 +710,8 @@ func _make_tile(def: Dictionary) -> void:
 	var bi: int = maxi(TechTree.BRANCHES.find(branch), 0)
 	var tier: int = clampi(int(def.get("tier", 1)), 1, 4)
 	var slot: int = int(def.get("slot", 0))
-	var colw: float = _canvas_w() / 4.0
-	var cx: float = colw * (float(bi) + 0.5)
+	# Tabbed (one branch at a time) layout: every branch is centred in the canvas.
+	var cx: float = _canvas_w() * 0.5
 	if _tier_count(branch, tier) > 1:
 		cx += -TILE_DX if slot == 0 else TILE_DX
 	var center := Vector2(cx, _tier_y(tier))
@@ -978,20 +1045,67 @@ func _build_details() -> void:
 
 
 func _build_strip() -> void:
+	var bh: float = _body_h()
+	var sw: float = PANEL_SIZE.x - PAD * 2.0
 	_strip = Control.new()
-	_strip.position = Vector2(PAD, PANEL_SIZE.y - PAD)
-	_strip.size = Vector2(PANEL_SIZE.x - PAD * 2.0, 0.0)
+	_strip.position = Vector2(PAD, BODY_Y)
+	_strip.size = Vector2(sw, bh)
 	_strip.visible = false
-	_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_strip.mouse_filter = Control.MOUSE_FILTER_PASS
 	_strip.draw.connect(_draw_strip)
 	_panel.add_child(_strip)
 
+	var lx: float = 18.0
+	var lw: float = STRIP_LEFT_W
+	_crisis_split_x = lx + lw + 18.0
+
+	# Left top: Repeatable Science Projects (>=48dp touch buttons)
+	var phead := _hbox(10)
+	phead.position = Vector2(lx, 14.0)
+	phead.size = Vector2(lw, 28.0)
+	_strip.add_child(phead)
+	phead.add_child(_icon("satellite", SCIENCE_COL, 22.0))
+	var pt := _label("HeaderLabel", "tree.projects.title")
+	pt.add_theme_font_size_override("font_size", 15)
+	pt.add_theme_color_override("font_color", SCIENCE_COL.lerp(Color.WHITE, 0.25))
+	_ellipsis(pt)
+	phead.add_child(pt)
+
+	var proj_col := _vbox(12)
+	proj_col.position = Vector2(lx, 50.0)
+	proj_col.size = Vector2(lw, 176.0)
+	_strip.add_child(proj_col)
+
+	_proj_algae_btn = _make_project_card_btn(
+		"posidonia",
+		"project.bio_algae.name",
+		"project.bio_algae.desc",
+		"%d 🧪  %d 💰" % [int(Balance.PROJECT_BIO_ALGAE_COST), int(Balance.PROJECT_BIO_ALGAE_BUDGET)],
+		lw,
+		_on_bio_algae_pressed,
+		true
+	)
+	proj_col.add_child(_proj_algae_btn)
+
+	_proj_drone_btn = _make_project_card_btn(
+		"cleanup",
+		"project.drone_swarm.name",
+		"project.drone_swarm.desc",
+		"%d 🧪  %d 💰" % [int(Balance.PROJECT_DRONE_SWARM_COST), int(Balance.PROJECT_DRONE_SWARM_BUDGET)],
+		lw,
+		_on_drone_swarm_pressed,
+		false
+	)
+	proj_col.add_child(_proj_drone_btn)
+
+	# Left bottom: Crisis Adaptation Pressure bars
 	var head := _hbox(10)
-	head.position = Vector2(16.0, 10.0)
-	head.size = Vector2(STRIP_LEFT_W - 32.0, 24.0)
+	head.position = Vector2(lx, 244.0)
+	head.size = Vector2(lw, 26.0)
 	_strip.add_child(head)
-	head.add_child(_icon("evolution", UITheme.WARNING, 20.0))
+	head.add_child(_icon("evolution", UITheme.WARNING, 22.0))
 	var t := _label("HeaderLabel", "ui.tree.evo.title")
+	t.add_theme_font_size_override("font_size", 15)
 	t.add_theme_color_override("font_color", UITheme.WARNING)
 	head.add_child(t)
 	_evo_moves = _label("DimLabel")
@@ -1003,146 +1117,144 @@ func _build_strip() -> void:
 
 	var hint := _label("BodyDimLabel", "ui.tree.evo.hint")
 	hint.add_theme_font_size_override("font_size", 13)
-	hint.position = Vector2(16.0, 36.0)
-	hint.size = Vector2(STRIP_LEFT_W - 32.0, 20.0)
-	hint.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.position = Vector2(lx, 274.0)
+	hint.size = Vector2(lw, 38.0)
 	_strip.add_child(hint)
 
-	var bars := _hbox(18)
-	bars.position = Vector2(16.0, 64.0)
-	bars.size = Vector2(STRIP_LEFT_W - 32.0, 48.0)
-	_strip.add_child(bars)
+	var bars_col := _vbox(12)
+	bars_col.position = Vector2(lx, 320.0)
+	bars_col.size = Vector2(lw, bh - 334.0)
+	_strip.add_child(bars_col)
 	for b in TechTree.BRANCHES:
 		var branch: String = b
 		var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
 		var col: Color = _branch_color(branch)
-		var blk := _vbox(5)
-		blk.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		bars.add_child(blk)
-		var top := _hbox(6)
+		var blk := _vbox(4)
+		bars_col.add_child(blk)
+		var top := _hbox(8)
 		blk.add_child(top)
-		top.add_child(_icon(str(info.get("icon", "branch_" + branch)), col, 16.0))
+		top.add_child(_icon(str(info.get("icon", "branch_" + branch)), col, 18.0))
 		var nm := _label("SmallLabel", str(info.get("name_key", "")))
-		nm.add_theme_font_size_override("font_size", 12)
+		nm.add_theme_font_size_override("font_size", 14)
 		nm.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.35))
 		_ellipsis(nm)
 		top.add_child(nm)
 		var val := _label("SmallLabel")
 		val.add_theme_font_override("font", UITheme.mono_bold_font())
-		val.add_theme_font_size_override("font_size", 12)
+		val.add_theme_font_size_override("font_size", 14)
 		top.add_child(val)
 		_evo_vals[branch] = val
 		var bar := Control.new()
-		bar.custom_minimum_size = Vector2(0.0, 14.0)
+		bar.custom_minimum_size = Vector2(0.0, 18.0)
 		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bar.draw.connect(_draw_evo_bar.bind(branch))
 		blk.add_child(bar)
 		_evo_bars[branch] = bar
 		_evo_shown[branch] = 0.0
 
-	var rx: float = STRIP_LEFT_W + 18.0
-	var rw: float = _strip.size.x - rx - 16.0
-	var resist_w: float = 310.0
-	var proj_x: float = rx + resist_w + 14.0
-	var proj_w: float = rw - resist_w - 14.0
+	# Right column: Active Crisis Resistances + Countering Policies + Synthesis
+	var rx: float = _crisis_split_x + 18.0
+	var rw: float = sw - rx - 18.0
 
 	var rhead := _hbox(10)
-	rhead.position = Vector2(rx, 10.0)
-	rhead.size = Vector2(resist_w, 24.0)
+	rhead.position = Vector2(rx, 14.0)
+	rhead.size = Vector2(rw, 28.0)
 	_strip.add_child(rhead)
-	rhead.add_child(_icon("crisis", UITheme.CRISIS, 18.0))
+	rhead.add_child(_icon("crisis", UITheme.CRISIS, 22.0))
 	var rt := _label("HeaderLabel", "ui.tree.evo.resist_title")
+	rt.add_theme_font_size_override("font_size", 15)
 	rt.add_theme_color_override("font_color", UITheme.CRISIS.lerp(Color.WHITE, 0.15))
 	_ellipsis(rt)
 	rhead.add_child(rt)
 	_resist_more = _label("DimLabel")
 	rhead.add_child(_resist_more)
 
-	_resist_box = _hbox(12)
-	_resist_box.position = Vector2(rx, 40.0)
-	_resist_box.size = Vector2(resist_w, 74.0)
-	_strip.add_child(_resist_box)
-
 	_resist_none = _label("BodyDimLabel", "ui.tree.evo.none")
-	_resist_none.add_theme_font_size_override("font_size", 13)
+	_resist_none.add_theme_font_size_override("font_size", 15)
 	_resist_none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_resist_none.max_lines_visible = 3
-	_resist_none.position = Vector2(rx, 44.0)
-	_resist_none.size = Vector2(resist_w, 60.0)
+	_resist_none.position = Vector2(rx, 58.0)
+	_resist_none.size = Vector2(rw, 80.0)
 	_strip.add_child(_resist_none)
 
-	# Repeatable Science Projects
-	var phead := _hbox(8)
-	phead.position = Vector2(proj_x, 10.0)
-	phead.size = Vector2(proj_w, 24.0)
-	_strip.add_child(phead)
-	phead.add_child(_icon("satellite", SCIENCE_COL, 18.0))
-	var pt := _label("HeaderLabel", "tree.projects.title")
-	pt.add_theme_font_size_override("font_size", 12)
-	pt.add_theme_color_override("font_color", SCIENCE_COL.lerp(Color.WHITE, 0.2))
-	_ellipsis(pt)
-	phead.add_child(pt)
+	var rscroll := ScrollContainer.new()
+	rscroll.position = Vector2(rx, 50.0)
+	rscroll.size = Vector2(rw, bh - 66.0)
+	rscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rscroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	rscroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	rscroll.gui_input.connect(_on_scroll_touch_drag.bind(rscroll))
+	_strip.add_child(rscroll)
 
-	var proj_col := _vbox(5)
-	proj_col.position = Vector2(proj_x, 38.0)
-	proj_col.size = Vector2(proj_w, 76.0)
-	_strip.add_child(proj_col)
+	_resist_box = _vbox(12)
+	_resist_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rscroll.add_child(_resist_box)
 
-	_proj_algae_btn = Button.new()
-	_proj_algae_btn.custom_minimum_size = Vector2(proj_w, 34.0)
-	_proj_algae_btn.theme_type_variation = &"ChipButton"
-	_proj_algae_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_proj_algae_btn.tooltip_text = I18n.t("project.bio_algae.desc")
-	_proj_algae_btn.pressed.connect(_on_bio_algae_pressed)
-	proj_col.add_child(_proj_algae_btn)
-	var a_row := _hbox(6)
-	a_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	a_row.offset_left = 6.0
-	a_row.offset_right = -6.0
-	_proj_algae_btn.add_child(a_row)
-	a_row.add_child(_icon("posidonia", SCIENCE_COL, 16.0))
-	var a_title := _label("SmallLabel", "project.bio_algae.name")
-	a_title.add_theme_font_size_override("font_size", 11)
-	a_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_ellipsis(a_title)
-	a_row.add_child(a_title)
-	_proj_algae_cost = _label("SmallLabel")
-	_proj_algae_cost.text = "40🧪 25💰"
-	_proj_algae_cost.add_theme_font_override("font", UITheme.mono_bold_font())
-	_proj_algae_cost.add_theme_font_size_override("font_size", 11)
-	_proj_algae_cost.add_theme_color_override("font_color", SCIENCE_COL)
-	a_row.add_child(_proj_algae_cost)
-	_proj_algae_cd = _label("SmallLabel")
-	_proj_algae_cd.add_theme_font_size_override("font_size", 11)
-	a_row.add_child(_proj_algae_cd)
 
-	_proj_drone_btn = Button.new()
-	_proj_drone_btn.custom_minimum_size = Vector2(proj_w, 34.0)
-	_proj_drone_btn.theme_type_variation = &"ChipButton"
-	_proj_drone_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_proj_drone_btn.tooltip_text = I18n.t("project.drone_swarm.desc")
-	_proj_drone_btn.pressed.connect(_on_drone_swarm_pressed)
-	proj_col.add_child(_proj_drone_btn)
-	var d_row := _hbox(6)
-	d_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	d_row.offset_left = 6.0
-	d_row.offset_right = -6.0
-	_proj_drone_btn.add_child(d_row)
-	d_row.add_child(_icon("cleanup", SCIENCE_COL, 16.0))
-	var d_title := _label("SmallLabel", "project.drone_swarm.name")
-	d_title.add_theme_font_size_override("font_size", 11)
-	d_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_ellipsis(d_title)
-	d_row.add_child(d_title)
-	_proj_drone_cost = _label("SmallLabel")
-	_proj_drone_cost.text = "30🧪 20💰"
-	_proj_drone_cost.add_theme_font_override("font", UITheme.mono_bold_font())
-	_proj_drone_cost.add_theme_font_size_override("font_size", 11)
-	_proj_drone_cost.add_theme_color_override("font_color", SCIENCE_COL)
-	d_row.add_child(_proj_drone_cost)
-	_proj_drone_cd = _label("SmallLabel")
-	_proj_drone_cd.add_theme_font_size_override("font_size", 11)
-	d_row.add_child(_proj_drone_cd)
+func _make_project_card_btn(icon_id: String, name_key: String, desc_key: String, cost_txt: String, width: float, cb: Callable, is_algae: bool) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(width, 82.0)
+	btn.theme_type_variation = &"ChipButton"
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_wire_button(btn)
+	btn.pressed.connect(cb)
+
+	var row := _hbox(12)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 12.0
+	row.offset_right = -12.0
+	row.offset_top = 8.0
+	row.offset_bottom = -8.0
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(row)
+
+	var ic := _icon(icon_id, SCIENCE_COL, 32.0)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(ic)
+
+	var mid := _vbox(3)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mid.alignment = BoxContainer.ALIGNMENT_CENTER
+	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(mid)
+
+	var title := _label("HeaderLabel", name_key)
+	title.add_theme_font_size_override("font_size", 15)
+	_ellipsis(title)
+	mid.add_child(title)
+
+	var desc := _label("BodyDimLabel", desc_key)
+	desc.add_theme_font_size_override("font_size", 12)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.max_lines_visible = 2
+	mid.add_child(desc)
+
+	var right := _vbox(4)
+	right.alignment = BoxContainer.ALIGNMENT_CENTER
+	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(right)
+
+	var cost_lbl := _label("SmallLabel")
+	cost_lbl.text = cost_txt
+	cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cost_lbl.add_theme_font_override("font", UITheme.mono_bold_font())
+	cost_lbl.add_theme_font_size_override("font_size", 14)
+	cost_lbl.add_theme_color_override("font_color", SCIENCE_COL)
+	right.add_child(cost_lbl)
+
+	var cd_lbl := _label("SmallLabel")
+	cd_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cd_lbl.add_theme_font_size_override("font_size", 13)
+	right.add_child(cd_lbl)
+
+	if is_algae:
+		_proj_algae_cost = cost_lbl
+		_proj_algae_cd = cd_lbl
+	else:
+		_proj_drone_cost = cost_lbl
+		_proj_drone_cd = cd_lbl
+	return btn
 
 
 # --- Refresh ----------------------------------------------------------------------------
@@ -1332,12 +1444,9 @@ func _refresh_details() -> void:
 
 
 func _on_scroll_touch_drag(event: InputEvent, sc: ScrollContainer) -> void:
-	if event is InputEventScreenDrag:
-		var sd := event as InputEventScreenDrag
-		sc.scroll_vertical -= int(sd.relative.y)
-	elif event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if mm.device != InputEvent.DEVICE_ID_EMULATION and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			sc.scroll_vertical -= int(mm.relative.y)
 
 
@@ -1484,83 +1593,113 @@ func _rebuild_resist_chips() -> void:
 		var child: Node = c
 		_resist_box.remove_child(child)
 		child.queue_free()
-	var shown: int = mini(_active.size(), MAX_CHIPS)
-	for i in shown:
-		_resist_box.add_child(_resist_chip(str(_active[i])))
+	for evo in _active:
+		_resist_box.add_child(_resist_chip(str(evo)))
 	_resist_none.visible = _active.is_empty()
-	if _active.size() > shown:
-		_resist_more.text = I18n.t("ui.tree.evo.more", {"n": str(_active.size() - shown)})
-	else:
-		_resist_more.text = ""
+	_resist_more.text = ""
+	_update_branch_tabs()
 
 
 func _resist_chip(evo_id: String) -> PanelContainer:
 	var def: Dictionary = TechTree.evolution_def(evo_id)
 	var p := PanelContainer.new()
-	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.mouse_filter = Control.MOUSE_FILTER_PASS
 	p.add_theme_stylebox_override("panel", UITheme.stripe_box(UITheme.CRISIS, 0.8))
 	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var row := _hbox(10)
-	p.add_child(row)
-	row.add_child(_icon(str(def.get("icon", "evolution")), UITheme.CRISIS.lerp(Color.WHITE, 0.15), 30.0))
-	var col := _vbox(4)
-	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(col)
-	var nm := _label("SmallLabel")
+	var outer := _vbox(10)
+	outer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(outer)
+
+	var top := _hbox(10)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	outer.add_child(top)
+	top.add_child(_icon(str(def.get("icon", "evolution")), UITheme.CRISIS.lerp(Color.WHITE, 0.15), 28.0))
+	var nm := _label("HeaderLabel")
 	nm.text = I18n.t(str(def.get("name_key", evo_id)))
-	nm.add_theme_font_override("font", UITheme.mono_bold_font())
-	nm.add_theme_color_override("font_color", UITheme.CRISIS.lerp(Color.WHITE, 0.45))
+	nm.add_theme_font_size_override("font_size", 15)
+	nm.add_theme_color_override("font_color", UITheme.CRISIS.lerp(Color.WHITE, 0.4))
 	_ellipsis(nm)
-	col.add_child(nm)
-	var cure := _hbox(5)
-	col.add_child(cure)
-	var cl := _label("DimLabel")
-	cl.text = I18n.t("ui.tree.evo.cure")
-	cure.add_child(cl)
+	top.add_child(nm)
+
+	var cl := _label("DimLabel", "ui.tree.resist.counters_list")
+	cl.add_theme_font_size_override("font_size", 12)
+	outer.add_child(cl)
+
+	var cure_list := _vbox(8)
+	cure_list.mouse_filter = Control.MOUSE_FILTER_PASS
+	outer.add_child(cure_list)
 	for nid in TechTree.counters_of(evo_id):
-		cure.add_child(_counter_button(str(nid)))
+		var cbtn := _counter_button_mobile(str(nid))
+		cure_list.add_child(cbtn)
 
 	var can_synth: bool = GameState.can_synthesize_counter(evo_id)
 	var synth_btn := Button.new()
+	synth_btn.custom_minimum_size = Vector2(0.0, 50.0)
+	synth_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	synth_btn.text = I18n.t("tree.counter_synth.btn", {"cost": "30"})
 	synth_btn.theme_type_variation = &"ChipButton"
+	synth_btn.add_theme_font_size_override("font_size", 14)
 	synth_btn.focus_mode = Control.FOCUS_NONE
 	synth_btn.disabled = not can_synth
-	synth_btn.tooltip_text = I18n.t("tree.counter_synth.tip")
+	synth_btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	synth_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if can_synth else Control.CURSOR_ARROW
+	_wire_button(synth_btn)
 	synth_btn.pressed.connect(func() -> void:
 		if GameState.synthesize_counter(evo_id):
 			_refresh_all()
 	)
-	cure.add_child(synth_btn)
+	outer.add_child(synth_btn)
 	return p
+
+
+func _counter_button_mobile(node_id: String) -> Button:
+	var def: Dictionary = TechTree.node_def(node_id)
+	var branch: String = str(def.get("branch", ""))
+	var col: Color = _node_color(node_id)
+	var st: String = _state_of(node_id)
+	var btn := Button.new()
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(0.0, 50.0)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	var sb := UITheme.panel_box(UITheme.with_alpha(col, 0.7), UITheme.with_alpha(UITheme.BG_PANEL.lerp(col, 0.14), 0.9), 1, Color(0, 0, 0, 0), 0, 8)
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", sb)
+	btn.add_theme_stylebox_override("pressed", sb)
+	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	_wire_button(btn)
+
+	var row := _hbox(10)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 10.0
+	row.offset_right = -10.0
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(row)
+	var ic := _icon(str(def.get("icon", "")), col, 22.0)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(ic)
+	var nl := _label("SmallLabel")
+	nl.text = I18n.t(str(def.get("name_key", node_id)))
+	nl.add_theme_font_size_override("font_size", 14)
+	nl.add_theme_color_override("font_color", UITheme.TEXT if st != "locked" else UITheme.TEXT_DIM)
+	_ellipsis(nl)
+	row.add_child(nl)
+	var binfo: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
+	var bl := _label("DimLabel")
+	bl.text = I18n.t(str(binfo.get("name_key", "")))
+	bl.add_theme_font_size_override("font_size", 12)
+	bl.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.3))
+	row.add_child(bl)
+	btn.pressed.connect(_select.bind(node_id))
+	return btn
 
 
 func _format_node_details_text(def: Dictionary) -> String:
 	var desc: String = I18n.t(str(def.get("desc_key", "")))
 	var lines := [desc]
-	var bullets: Array = []
-	for eff in def.get("effects", []):
-		var op: String = str(eff.get("op", ""))
-		var val: float = float(eff.get("value", 0.0))
-		match op:
-			"region":
-				var stat: String = str(eff.get("stat", ""))
-				bullets.append("• +%d %s" % [int(val), stat.capitalize()])
-			"mul":
-				var k: String = str(eff.get("key", "")).replace("_mult", "").replace("_", " ")
-				var pct: int = roundi((val - 1.0) * 100.0)
-				var sgn: String = "+" if pct > 0 else ""
-				bullets.append("• %s: %s%d%%" % [k.capitalize(), sgn, pct])
-			"add":
-				var k: String = str(eff.get("key", "")).replace("_", " ")
-				bullets.append("• %s: +%.1f" % [k.capitalize(), val])
-	if not bullets.is_empty():
-		lines.append("")
-		lines.append_array(bullets)
-	if def.get("requires", []).size() > 1:
-		lines.append("• Sinerji / Synergy: Çapraz dal entegrasyonu")
-	return "\n".join(lines)
+	return "
+".join(lines)
 
 
 ## Small icon button for a counter policy: hover previews it, click selects it in the tree.
@@ -1659,20 +1798,11 @@ func _set_tile_hover(v: float, id: String) -> void:
 
 
 func _on_tile_input(event: InputEvent, id: String) -> void:
-	if event is InputEventScreenTouch:
-		var st := event as InputEventScreenTouch
-		if st.pressed:
-			_hover_id = ""
-			if _selected_id == id and _state_of(id) == "affordable":
-				_try_adopt(id)
-			else:
-				_select(id)
-		return
 	var mb := event as InputEventMouseButton
 	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	_hover_id = ""
-	if mb.double_click or (_selected_id == id and _state_of(id) == "affordable"):
+	if mb.double_click:
 		_selected_id = id
 		_try_adopt(id)
 	else:
@@ -1787,16 +1917,12 @@ func _on_language_changed(_lang: String) -> void:
 		var item: Array = pair
 		var l: Label = item[0]
 		l.text = I18n.t(str(item[1]))
-	var tab_icons := {
-		"protect": "🛡️ ",
-		"source": "🚫 ",
-		"science": "🔬 ",
-		"economy": "⚖️ "
-	}
 	for branch in TechTree.BRANCHES:
-		if _branch_tabs.has(branch):
+		if _branch_tab_labels.has(branch):
 			var info: Dictionary = TechTree.BRANCH_INFO.get(branch, {})
-			_branch_tabs[branch].text = str(tab_icons.get(branch, "")) + I18n.t(str(info.get("name_key", "")))
+			_branch_tab_labels[branch].text = I18n.t(str(info.get("name_key", "")))
+	if _branch_tab_labels.has(TAB_CRISIS):
+		_branch_tab_labels[TAB_CRISIS].text = I18n.t("ui.tree.tab.crisis_projects")
 	for k in _tiles:
 		_fit_tile_name(str(k))
 	_resist_sig = ""
@@ -1818,16 +1944,18 @@ func _fit_close_button() -> void:
 func _play_open() -> void:
 	if _anim != null and _anim.is_valid():
 		_anim.kill()
+	_layout()
+	var ts: float = _target_scale()
 	_backdrop.modulate = Color(1, 1, 1, 0)
 	_panel.modulate = Color(1, 1, 1, 0)
-	_panel.scale = Vector2(0.965, 0.965)
+	_panel.scale = Vector2(ts * 0.965, ts * 0.965)
 	_scan = 0.0
 	_backdrop.queue_redraw()
 	_anim = create_tween()
 	_anim.set_parallel(true)
 	_anim.tween_property(_backdrop, "modulate:a", 1.0, 0.22)
 	_anim.tween_property(_panel, "modulate:a", 1.0, 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_anim.tween_property(_panel, "scale", Vector2.ONE, 0.34).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_anim.tween_property(_panel, "scale", Vector2(ts, ts), 0.34).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_anim.tween_method(_set_scan, 0.0, 1.0, 0.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_fit_close_button.call_deferred()
 
@@ -1960,8 +2088,8 @@ func _draw_canvas() -> void:
 	_canvas.draw_style_box(sb, Rect2(0.0, 0.0, w, h))
 
 	# Tier background lines
-	for t in 4:
-		var ty: float = 65.0 + float(t) * 125.0
+	for t in range(1, 5):
+		var ty: float = _tier_y(t)
 		_dash(_canvas, Vector2(16.0, ty), Vector2(w - 16.0, ty), UITheme.with_alpha(bcol, 0.08), 1.0, 4.0, 8.0)
 
 func _dash(ci: CanvasItem, a: Vector2, b: Vector2, col: Color, width: float, dash: float, gap: float) -> void:
@@ -2163,11 +2291,11 @@ func _draw_detail_frame_icon() -> void:
 func _draw_strip() -> void:
 	var r := Rect2(Vector2.ZERO, _strip.size)
 	_strip.draw_style_box(_strip_style, r)
-	_strip.draw_line(Vector2(STRIP_LEFT_W, 12.0), Vector2(STRIP_LEFT_W, r.size.y - 12.0), UITheme.with_alpha(UITheme.TEXT_DIM, 0.22), 1.0)
-	_strip.draw_rect(Rect2(10.0, 0.0, 120.0, 2.0), UITheme.with_alpha(UITheme.WARNING, 0.85))
+	_strip.draw_line(Vector2(_crisis_split_x, 14.0), Vector2(_crisis_split_x, r.size.y - 14.0), UITheme.with_alpha(UITheme.TEXT_DIM, 0.22), 1.0)
+	_strip.draw_rect(Rect2(10.0, 0.0, 120.0, 2.0), UITheme.with_alpha(UITheme.SCIENCE_BLUE, 0.85))
 	if not _active.is_empty():
 		var pulse: float = 0.5 + 0.5 * sin(_time * 3.0)
-		_strip.draw_rect(Rect2(STRIP_LEFT_W + 1.0, 0.0, r.size.x - STRIP_LEFT_W - 11.0, 2.0), UITheme.with_alpha(UITheme.CRISIS, 0.45 + 0.4 * pulse))
+		_strip.draw_rect(Rect2(_crisis_split_x + 1.0, 0.0, r.size.x - _crisis_split_x - 11.0, 2.0), UITheme.with_alpha(UITheme.CRISIS, 0.45 + 0.4 * pulse))
 
 
 func _draw_evo_bar(branch: String) -> void:

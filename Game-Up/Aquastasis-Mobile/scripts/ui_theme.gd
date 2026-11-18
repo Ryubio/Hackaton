@@ -448,3 +448,42 @@ static func dashed_line(ci: CanvasItem, a: Vector2, b: Vector2, color: Color, wi
 		var e: float = minf(d + dash, length)
 		ci.draw_line(a + dir * d, a + dir * e, color, width, true)
 		d += dash + gap
+
+
+## Computes viewport-space safe-area insets Vector4(left, top, right, bottom)
+## for mobile notches, iOS Dynamic Island, Home Indicator bar, and Android edge-to-edge cutouts.
+static func safe_insets(viewport: Viewport = null) -> Vector4:
+	for arg in OS.get_cmdline_user_args():
+		var s := str(arg)
+		if s.begins_with("--safe-inset="):
+			var parts := s.trim_prefix("--safe-inset=").split(",")
+			if parts.size() >= 4:
+				return Vector4(float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
+	var vp_size := Vector2(1280.0, 720.0)
+	if viewport != null:
+		var r := viewport.get_visible_rect()
+		if r.size.x > 1.0 and r.size.y > 1.0:
+			vp_size = r.size
+	var left := 0.0
+	var top := 0.0
+	var right := 0.0
+	var bottom := 0.0
+	if DisplayServer.get_name() != "headless":
+		var win_size: Vector2i = DisplayServer.window_get_size()
+		var safe_rect: Rect2i = DisplayServer.get_display_safe_area()
+		if win_size.x > 0 and win_size.y > 0 and safe_rect.size.x > 0 and safe_rect.size.y > 0:
+			var sx: float = vp_size.x / float(win_size.x)
+			var sy: float = vp_size.y / float(win_size.y)
+			left = maxf(0.0, float(safe_rect.position.x) * sx)
+			top = maxf(0.0, float(safe_rect.position.y) * sy)
+			right = maxf(0.0, float(win_size.x - (safe_rect.position.x + safe_rect.size.x)) * sx)
+			bottom = maxf(0.0, float(win_size.y - (safe_rect.position.y + safe_rect.size.y)) * sy)
+	var os_name := OS.get_name()
+	if os_name == "Android" or os_name == "iOS":
+		var aspect: float = vp_size.x / maxf(1.0, vp_size.y)
+		if aspect >= 1.90:
+			left = maxf(left, 44.0)
+			right = maxf(right, 44.0)
+		if os_name == "iOS":
+			bottom = maxf(bottom, 16.0)
+	return Vector4(clampf(left, 0.0, 96.0), clampf(top, 0.0, 48.0), clampf(right, 0.0, 96.0), clampf(bottom, 0.0, 48.0))

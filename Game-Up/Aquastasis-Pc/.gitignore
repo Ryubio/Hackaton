@@ -12,3 +12,7 @@ Thumbs.db
 
 # Dev screenshots / movie frames
 shots/
+
+# Build outputs
+build/
+*.zip

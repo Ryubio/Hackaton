@@ -14,6 +14,11 @@ uniform float flash : hint_range(0.0, 1.0) = 0.0;
 uniform float pulse : hint_range(0.0, 1.0) = 0.0;
 uniform float coral : hint_range(0.0, 1.0) = 0.6;
 uniform float seagrass : hint_range(0.0, 1.0) = 0.6;
+uniform int layer_mode = 0;
+uniform float protection : hint_range(0.0, 1.0) = 0.0;
+uniform float spread_risk : hint_range(0.0, 1.0) = 0.0;
+uniform float biodiversity : hint_range(0.0, 1.0) = 0.5;
+uniform float blue_carbon : hint_range(0.0, 1.0) = 0.0;
 uniform float wave_phase = 0.0;
 uniform float seed = 0.0;
 uniform vec2 anchor = vec2(0.0, 0.0);
@@ -26,6 +31,7 @@ uniform vec3 pulse_color : source_color = vec3(0.098, 0.902, 0.757);
 // selection rings stay out from under the text so the name remains readable.
 uniform vec2 label_center = vec2(0.0, 0.0);
 uniform vec2 label_half = vec2(0.0, 0.0);
+uniform float world_width = 69.12;
 
 varying vec3 wpos;
 varying float v_part;
@@ -66,7 +72,7 @@ float vis_health() {
 }
 
 float wave_amp(float vh) {
-	return mix(0.015, 0.09, vh);
+	return mix(0.02, 0.14, vh);
 }
 
 float waves(vec2 p, float t, float amp) {
@@ -94,12 +100,29 @@ void fragment() {
 	float vh = vis_health();
 	float sick = 1.0 - vh;
 	vec3 scol = status_color(vh);
-	float r = length(p - anchor);
+	float shield01 = clamp(protection / 0.65, 0.0, 1.0);
+	float threat01 = clamp((1.0 - shield01) * 0.7 + spread_risk * 0.65, 0.0, 1.0);
+	float bio01 = clamp(smoothstep(0.25, 0.85, biodiversity), 0.0, 1.0);
+	vec3 layer_rim_col = scol;
+	if (layer_mode == 1) {
+		layer_rim_col = mix(vec3(0.14, 0.72, 0.98), mix(warning_color, crisis_color, spread_risk), threat01);
+	} else if (layer_mode == 2) {
+		vec3 gold_bio = mix(vec3(0.16, 0.20, 0.28), accent_color * 1.1, bio01);
+		layer_rim_col = mix(gold_bio, healthy_color, blue_carbon * 0.85);
+	}
+	vec2 d_anch = p - anchor;
+	vec2 d_lbl = p - label_center;
+	if (world_width > 0.0) {
+		float hw = world_width * 0.5;
+		d_anch.x = mod(d_anch.x + hw, world_width) - hw;
+		d_lbl.x = mod(d_lbl.x + hw, world_width) - hw;
+	}
+	float r = length(d_anch);
 
 	// Selection: thin rings drifting outward from the anchor. Action pulse: one expanding ring.
 	float sel_w = fract(r * 0.22 - t * 0.35);
 	float sel_ring = smoothstep(0.0, 0.03, sel_w) * (1.0 - smoothstep(0.03, 0.16, sel_w)) * selected;
-	vec2 ld = abs(p - label_center);
+	vec2 ld = abs(d_lbl);
 	float under_label = (1.0 - smoothstep(label_half.x, label_half.x + 0.35, ld.x))
 		* (1.0 - smoothstep(label_half.y, label_half.y + 0.35, ld.y));
 	sel_ring *= 1.0 - under_label;
@@ -111,16 +134,16 @@ void fragment() {
 	if (v_part < 0.5) {
 		// ---------------- water surface ----------------
 		float amp = wave_amp(vh);
-		float e = 0.06;
+		float e = 0.07;
 		vec2 drift = vec2(t * 0.25, t * 0.18);
 		float h0 = waves(p, wave_phase, amp);
 		float hx = waves(p + vec2(e, 0.0), wave_phase, amp);
 		float hz = waves(p + vec2(0.0, e), wave_phase, amp);
-		float rip = mix(0.004, 0.018, vh);
+		float rip = mix(0.006, 0.024, vh);
 		float n0 = fbm(p * 2.2 + drift);
 		float nx = fbm((p + vec2(e, 0.0)) * 2.2 + drift);
 		float nz = fbm((p + vec2(0.0, e)) * 2.2 + drift);
-		vec3 nw = normalize(vec3(-((hx - h0) + (nx - n0) * rip) / e, 1.0, -((hz - h0) + (nz - n0) * rip) / e));
+		vec3 nw = normalize(vec3(-((hx - h0) * 1.65 + (nx - n0) * rip) / e, 1.0, -((hz - h0) * 1.65 + (nz - n0) * rip) / e));
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
 		float sh = clamp(v_extra, 0.0, 1.0);
@@ -199,8 +222,25 @@ void fragment() {
 		em += vec3(0.6, 0.55, 0.5) * debris * 0.55;
 		em += vec3(0.3, 1.0, 0.55) * grass * near_coast * seagrass * 1.3;
 		em += vec3(0.95, 0.93, 0.88) * bleach * near_coast * (1.0 - coral) * 1.1;
+		if (layer_mode == 1) {
+			float scan = 0.72 + 0.28 * sin(t * 2.8 - r * 0.45);
+			vec3 shield_fill = mix(vec3(0.02, 0.14, 0.25), vec3(0.06, 0.42, 0.65), shallow);
+			vec3 threat_fill = mix(warning_color * 0.24, crisis_color * 0.34, spread_risk) * scan;
+			vec3 base_l = mix(shield_fill, threat_fill, threat01);
+			float warn_stripe = smoothstep(0.55, 0.88, 0.5 + 0.5 * sin((p.x + p.y) * 2.0 - t * 1.6)) * threat01;
+			em = mix(em * 0.25, base_l, 0.85) + crisis_color * warn_stripe * (0.14 + spread_risk * 0.28);
+			em += vec3(0.15, 0.78, 1.0) * shield01 * (1.0 - threat01) * shallow * 0.25;
+		} else if (layer_mode == 2) {
+			float pulse_bio = 0.82 + 0.18 * sin(t * 1.9 + near_coast * 3.0);
+			vec3 dim_sea = mix(vec3(0.015, 0.032, 0.075), vec3(0.03, 0.07, 0.14), shallow);
+			vec3 blue_fill = healthy_color * mix(0.28, 0.58, near_coast) * blue_carbon * pulse_bio;
+			vec3 gold_fill = accent_color * mix(0.22, 0.55, shallow) * bio01 * pulse_bio;
+			em = em * 0.22 + dim_sea + blue_fill + gold_fill * (1.0 - blue_carbon * 0.45);
+			em += healthy_color * grass * near_coast * 1.4;
+			em += accent_color * caustic * bio01 * 0.75;
+		}
 		// interaction feedback
-		em = em * (1.0 + highlight * 0.55) + scol * highlight * 0.035;
+		em = em * (1.0 + highlight * 0.55) + layer_rim_col * highlight * 0.035;
 		em += accent_color * (sel_ring * 1.1 + selected * 0.025);
 		em += pulse_color * pulse_ring * 1.8;
 		// spread hit: tint the water red but keep its texture (a flat bright fill blooms
@@ -209,15 +249,15 @@ void fragment() {
 		em += crisis_color * flash_ring * 1.5;
 		ALBEDO = water * 0.12 * (1.0 - flash * 0.6);
 		EMISSION = em;
-		ROUGHNESS = clamp(mix(0.5, 0.28, vh) - slick * 0.15, 0.05, 1.0);
-		SPECULAR = mix(0.05, 0.2, vh);
+		ROUGHNESS = clamp(mix(0.42, 0.18, vh) - slick * 0.14, 0.04, 1.0);
+		SPECULAR = mix(0.12, 0.48, vh);
 		METALLIC = 0.0;
 	} else if (v_part < 1.5) {
 		// ---------------- glowing rim band ----------------
 		float along = UV2.y;
 		float run = 0.78 + 0.22 * sin(along * 2.2 - t * 2.4);
 		float across = 1.0 - v_extra * 0.65;
-		vec3 rim = scol * (1.0 + highlight * 1.6) * run * across;
+		vec3 rim = layer_rim_col * (1.0 + highlight * 1.6) * run * across;
 		rim = mix(rim, accent_color * 2.6 * across, selected);
 		rim += crisis_color * flash * 2.2;
 		rim += pulse_color * pulse * 1.5;
@@ -229,7 +269,7 @@ void fragment() {
 		// ---------------- side walls ----------------
 		float k = 1.0 - clamp(v_extra, 0.0, 1.0);
 		float glow = 0.06 + 0.7 * pow(k, 4.0);
-		vec3 wall = scol * glow * (1.0 + highlight * 0.9);
+		vec3 wall = layer_rim_col * glow * (1.0 + highlight * 0.9);
 		wall = mix(wall, accent_color * glow * 1.4, selected * 0.85);
 		wall += crisis_color * flash * pow(k, 2.0) * 1.2;
 		ALBEDO = vec3(0.02);

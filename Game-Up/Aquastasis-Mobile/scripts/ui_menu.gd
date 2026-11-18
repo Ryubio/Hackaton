@@ -13,6 +13,7 @@ signal quit_requested()
 const UITheme := preload("res://scripts/ui_theme.gd")
 const Icons := preload("res://scripts/icons.gd")
 const Charts := preload("res://scripts/charts.gd")
+const RegionData := preload("res://scripts/region.gd")
 
 const BAND_H := 36.0
 const COLUMN_W := 960.0
@@ -77,6 +78,12 @@ var _gfx_buttons: Dictionary = {}
 var _fps_buttons: Dictionary = {}
 var _haptic_buttons: Dictionary = {}
 
+# HQ Selection Modal (after difficulty selection)
+var _hq_modal: Control = null
+var _hq_cards: Dictionary = {}
+var _hq_title_label: Label = null
+var _hq_sub_label: Label = null
+
 # End screen
 var _end_root: Control
 var _end_overlay: ColorRect
@@ -101,11 +108,13 @@ func _ready() -> void:
 	_build_end()
 	_build_achievements_modal()
 	_build_settings_modal()
+	_build_hq_modal()
 	_main_root.visible = false
 	_pause_root.visible = false
 	_end_root.visible = false
 	_ach_modal.visible = false
 	_settings_modal.visible = false
+	_hq_modal.visible = false
 	visible = false
 	EventBus.language_changed.connect(_on_language_changed)
 	EventBus.achievement_unlocked.connect(func(_id: String) -> void: _sync_achievements())
@@ -179,6 +188,16 @@ func _button(variation: String, icon_id: String, key: String, min_size: Vector2,
 		ic.offset_bottom = px * 0.5
 		btn.add_child(ic)
 		btn.add_theme_constant_override("h_separation", 8)
+		var pad_left: float = 20.0 + px + 8.0
+		var th: Theme = UITheme.build_theme()
+		for st_name in ["normal", "hover", "pressed", "disabled", "focus"]:
+			var base_sb: StyleBox = th.get_stylebox(st_name, StringName(variation))
+			if base_sb == null:
+				base_sb = th.get_stylebox(st_name, &"Button")
+			if base_sb is StyleBoxFlat:
+				var sb_copy := (base_sb as StyleBoxFlat).duplicate() as StyleBoxFlat
+				sb_copy.content_margin_left = pad_left
+				btn.add_theme_stylebox_override(st_name, sb_copy)
 	return btn
 
 
@@ -346,7 +365,7 @@ func _build_main() -> void:
 	_pulse.pulse_health = 38.0
 	top_row.add_child(_pulse)
 	var coords := _label("DimLabel")
-	coords.text = "36.8969° N · 30.7133° E · ANTALYA"
+	coords.text = "00.0000° N · 165.0000° E · GLOBAL OCEAN"
 	coords.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	coords.add_theme_color_override("font_color", UITheme.with_alpha(UITheme.HEALTHY, 0.8))
 	top_row.add_child(coords)
@@ -424,8 +443,8 @@ func _build_main() -> void:
 		var d_def: Dictionary = Balance.DIFFICULTIES[d_id]
 		var btn := Button.new()
 		btn.theme_type_variation = &"ChipButton"
-		btn.custom_minimum_size = Vector2(180.0, 56.0)
-		btn.text = d_def["badge"]
+		btn.custom_minimum_size = Vector2(200.0, 52.0)
+		btn.text = I18n.t(str(d_def.get("name_key", d_id)))
 		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		btn.pressed.connect(_on_diff_selected.bind(d_id))
 		diff_row.add_child(btn)
@@ -901,14 +920,16 @@ func show_main() -> void:
 	for it in _main_items:
 		var item: Control = it
 		item.modulate.a = 0.0
-	_set_main_margin(COLUMN_X - 60.0)
+	var safe_l: float = UITheme.safe_insets(get_viewport()).x
+	var target_x: float = COLUMN_X + safe_l
+	_set_main_margin(target_x - 60.0)
 	_anim = create_tween()
 	_anim.set_parallel(true)
 	_anim.set_trans(Tween.TRANS_CUBIC)
 	_anim.set_ease(Tween.EASE_OUT)
 	_anim.tween_property(_main_root, "modulate:a", 1.0, 0.7)
 	_anim.tween_method(_set_band, 0.0, 1.0, 0.9).set_trans(Tween.TRANS_EXPO)
-	_anim.tween_method(_set_main_margin, COLUMN_X - 60.0, COLUMN_X, 1.1)
+	_anim.tween_method(_set_main_margin, target_x - 60.0, target_x, 1.1)
 	_anim.tween_method(_set_title_reveal, 0.0, 1.0, 1.4).set_delay(0.15)
 	_anim.tween_method(_set_title_spacing, 34.0, 6.0, 1.7).set_delay(0.15)
 	_anim.tween_property(_rule, "scale:x", 1.0, 0.8).set_delay(0.6)
@@ -978,16 +999,26 @@ func is_pause_open() -> bool:
 	return _mode == "pause"
 
 
+func is_modal_open() -> bool:
+	return (_ach_modal != null and _ach_modal.visible) or (_settings_modal != null and _settings_modal.visible) or (_hq_modal != null and _hq_modal.visible)
+
+
+func close_modals() -> void:
+	if _ach_modal != null:
+		_ach_modal.visible = false
+	if _settings_modal != null:
+		_settings_modal.visible = false
+	if _hq_modal != null:
+		_hq_modal.visible = false
+
+
 # --- Internals -------------------------------------------------------------------------------
 
 func _open_root(root: Control) -> void:
 	_kill_anim()
 	visible = true
 	modulate = Color.WHITE
-	if _ach_modal != null:
-		_ach_modal.visible = false
-	if _settings_modal != null:
-		_settings_modal.visible = false
+	close_modals()
 	for r in [_main_root, _pause_root, _end_root]:
 		var c: Control = r
 		c.visible = c == root
@@ -1036,8 +1067,7 @@ func _set_title_spacing(v: float) -> void:
 func _on_start_pressed() -> void:
 	AudioSynth.play_click()
 	if _mode == "main":
-		GameState.clear_save_game()
-		start_requested.emit()
+		_open_hq_modal()
 
 
 func _on_continue_pressed() -> void:
@@ -1101,12 +1131,9 @@ func _sync_achievements() -> void:
 
 
 func _on_scroll_touch_drag(event: InputEvent, sc: ScrollContainer) -> void:
-	if event is InputEventScreenDrag:
-		var sd := event as InputEventScreenDrag
-		sc.scroll_vertical -= int(sd.relative.y)
-	elif event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if mm.device != InputEvent.DEVICE_ID_EMULATION and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 			sc.scroll_vertical -= int(mm.relative.y)
 
 
@@ -1264,19 +1291,19 @@ func _build_settings_modal() -> void:
 
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = &"MenuPanel"
-	panel.custom_minimum_size = Vector2(860.0, 620.0)
+	panel.custom_minimum_size = Vector2(860.0, 646.0)
 	panel.draw.connect(_bracket_draw.bind(panel, UITheme.HEALTHY))
 	center.add_child(panel)
 
-	var col := _vbox(10)
+	var col := _vbox(8)
 	panel.add_child(col)
 
 	var head := _hbox(12)
 	head.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(head)
-	head.add_child(_icon("globe", UITheme.HEALTHY, 32.0))
+	head.add_child(_icon("globe", UITheme.HEALTHY, 30.0))
 	var title := _label("TitleLabel", "ui.settings.title")
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", UITheme.HEALTHY)
 	head.add_child(title)
 
@@ -1285,7 +1312,7 @@ func _build_settings_modal() -> void:
 	col.add_child(sep)
 
 	var s_scroll := ScrollContainer.new()
-	s_scroll.custom_minimum_size = Vector2(780.0, 410.0)
+	s_scroll.custom_minimum_size = Vector2(780.0, 462.0)
 	s_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	s_scroll.follow_focus = true
 	s_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1293,14 +1320,14 @@ func _build_settings_modal() -> void:
 	s_scroll.gui_input.connect(_on_scroll_touch_drag.bind(s_scroll))
 	col.add_child(s_scroll)
 
-	var scol := _vbox(14)
+	var scol := _vbox(10)
 	scol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scol.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.gui_input.connect(_on_scroll_touch_drag.bind(s_scroll))
 	s_scroll.add_child(scol)
 
 	# 1. Graphics Quality
-	var gfx_box := _vbox(6)
+	var gfx_box := _vbox(4)
 	gfx_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(gfx_box)
 	gfx_box.add_child(_label("HeaderLabel", "ui.settings.graphics"))
@@ -1310,7 +1337,7 @@ func _build_settings_modal() -> void:
 	_gfx_buttons.clear()
 	var gfx_keys := {0: "ui.settings.gfx_low", 1: "ui.settings.gfx_med", 2: "ui.settings.gfx_high"}
 	for q in [0, 1, 2]:
-		var gb := _button("ChipButton", "", gfx_keys[q], Vector2(220.0, 56.0), UITheme.HEALTHY)
+		var gb := _button("ChipButton", "", gfx_keys[q], Vector2(220.0, 46.0), UITheme.HEALTHY)
 		gb.toggle_mode = true
 		gb.mouse_filter = Control.MOUSE_FILTER_PASS
 		gb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1319,7 +1346,7 @@ func _build_settings_modal() -> void:
 		_gfx_buttons[q] = gb
 
 	# 2. FPS Limit
-	var fps_box := _vbox(6)
+	var fps_box := _vbox(4)
 	fps_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(fps_box)
 	fps_box.add_child(_label("HeaderLabel", "ui.settings.fps"))
@@ -1333,7 +1360,7 @@ func _build_settings_modal() -> void:
 		fb.toggle_mode = true
 		fb.focus_mode = Control.FOCUS_NONE
 		fb.mouse_filter = Control.MOUSE_FILTER_PASS
-		fb.custom_minimum_size = Vector2(220.0, 56.0)
+		fb.custom_minimum_size = Vector2(220.0, 46.0)
 		fb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		fb.text = "%d FPS" % fps_val
 		fb.pressed.connect(_on_fps_selected.bind(fps_val))
@@ -1341,13 +1368,13 @@ func _build_settings_modal() -> void:
 		_fps_buttons[fps_val] = fb
 
 	# 3. Audio Volume & Haptics
-	var aud_box := _vbox(6)
+	var aud_box := _vbox(4)
 	aud_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(aud_box)
 	aud_box.add_child(_label("HeaderLabel", "ui.settings.audio"))
 	_audio_row(aud_box)
 
-	var hap_box := _vbox(6)
+	var hap_box := _vbox(4)
 	hap_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(hap_box)
 	hap_box.add_child(_label("HeaderLabel", "ui.settings.haptics"))
@@ -1356,7 +1383,7 @@ func _build_settings_modal() -> void:
 	hap_box.add_child(hap_row)
 	_haptic_buttons.clear()
 	for h_on in [true, false]:
-		var hb := _button("ChipButton", "", "ui.settings.on" if h_on else "ui.settings.off", Vector2(220.0, 56.0), UITheme.HEALTHY)
+		var hb := _button("ChipButton", "", "ui.settings.on" if h_on else "ui.settings.off", Vector2(220.0, 46.0), UITheme.HEALTHY)
 		hb.toggle_mode = true
 		hb.mouse_filter = Control.MOUSE_FILTER_PASS
 		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1365,7 +1392,7 @@ func _build_settings_modal() -> void:
 		_haptic_buttons[h_on] = hb
 
 	# 4. Language
-	var lng_box := _vbox(6)
+	var lng_box := _vbox(4)
 	lng_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	scol.add_child(lng_box)
 	lng_box.add_child(_label("HeaderLabel", "ui.settings.lang"))
@@ -1380,7 +1407,7 @@ func _build_settings_modal() -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.mouse_filter = Control.MOUSE_FILTER_PASS
 		b.text = I18n.lang_name(code)
-		b.custom_minimum_size = Vector2(220.0, 56.0)
+		b.custom_minimum_size = Vector2(220.0, 46.0)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_lang_pressed.bind(code))
 		lng_row.add_child(b)
@@ -1393,7 +1420,7 @@ func _build_settings_modal() -> void:
 	var close_row := _hbox(12)
 	close_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(close_row)
-	var close_btn := _button("PrimaryButton", "check", "ui.settings.close", Vector2(320.0, 56.0), UITheme.HEALTHY)
+	var close_btn := _button("PrimaryButton", "check", "ui.settings.close", Vector2(320.0, 50.0), UITheme.HEALTHY)
 	close_btn.pressed.connect(_close_settings_modal)
 	close_row.add_child(close_btn)
 	_sync_settings_controls()
@@ -1463,6 +1490,176 @@ func _close_settings_modal() -> void:
 	_settings_modal.visible = false
 
 
+func _build_hq_modal() -> void:
+	_hq_modal = _full_rect(self, Control.MOUSE_FILTER_STOP)
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = UITheme.with_alpha(UITheme.BG, 0.88)
+	_hq_modal.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hq_modal.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = &"MenuPanel"
+	panel.custom_minimum_size = Vector2(960.0, 620.0)
+	panel.draw.connect(_bracket_draw.bind(panel, UITheme.HEALTHY))
+	center.add_child(panel)
+
+	var col := _vbox(10)
+	panel.add_child(col)
+
+	var head := _hbox(12)
+	head.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(head)
+	head.add_child(_icon("target", UITheme.HEALTHY, 32.0))
+	_hq_title_label = _label("TitleLabel", "ui.hq.title")
+	_hq_title_label.add_theme_font_size_override("font_size", 28)
+	_hq_title_label.add_theme_color_override("font_color", UITheme.HEALTHY)
+	head.add_child(_hq_title_label)
+
+	_hq_sub_label = _label("DimLabel", "ui.hq.subtitle")
+	_hq_sub_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hq_sub_label.add_theme_font_size_override("font_size", 17)
+	_hq_sub_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hq_sub_label.custom_minimum_size = Vector2(860.0, 0.0)
+	col.add_child(_hq_sub_label)
+
+	var sep := HSeparator.new()
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(sep)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(880.0, 390.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.gui_input.connect(_on_scroll_touch_drag.bind(scroll))
+	col.add_child(scroll)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 10)
+	grid.mouse_filter = Control.MOUSE_FILTER_PASS
+	grid.gui_input.connect(_on_scroll_touch_drag.bind(scroll))
+	scroll.add_child(grid)
+
+	_hq_cards.clear()
+	for rid in RegionData.IDS:
+		var btn := Button.new()
+		btn.theme_type_variation = &"ChipButton"
+		btn.toggle_mode = true
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.custom_minimum_size = Vector2(420.0, 74.0)
+		btn.mouse_filter = Control.MOUSE_FILTER_PASS
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		btn.pressed.connect(_on_hq_selected.bind(rid))
+		grid.add_child(btn)
+
+		var m := MarginContainer.new()
+		m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		m.add_theme_constant_override("margin_left", 14)
+		m.add_theme_constant_override("margin_right", 14)
+		m.add_theme_constant_override("margin_top", 8)
+		m.add_theme_constant_override("margin_bottom", 8)
+		btn.add_child(m)
+
+		var v := _vbox(3)
+		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		m.add_child(v)
+
+		var top_r := _hbox(8)
+		top_r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_child(top_r)
+		var ic := _icon("target", UITheme.AMBER, 20.0)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		top_r.add_child(ic)
+		var nl := _label("HeaderLabel")
+		nl.add_theme_font_size_override("font_size", 19)
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nl.clip_text = true
+		top_r.add_child(nl)
+
+		var sl := _label("SmallLabel")
+		sl.add_theme_font_size_override("font_size", 15)
+		sl.add_theme_color_override("font_color", UITheme.TEXT_DIM)
+		sl.clip_text = true
+		v.add_child(sl)
+
+		_hq_cards[rid] = {
+			"btn": btn,
+			"icon": ic,
+			"name": nl,
+			"species": sl,
+		}
+
+	var sep2 := HSeparator.new()
+	sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(sep2)
+
+	var btn_row := _hbox(16)
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(btn_row)
+	var back_btn := _button("GhostButton", "close", "ui.hq.back", Vector2(240.0, 54.0), UITheme.TEXT_DIM)
+	back_btn.pressed.connect(_close_hq_modal)
+	btn_row.add_child(back_btn)
+	var confirm_btn := _button("PrimaryButton", "play", "ui.hq.confirm", Vector2(320.0, 54.0), UITheme.HEALTHY)
+	confirm_btn.pressed.connect(_on_hq_confirmed)
+	btn_row.add_child(confirm_btn)
+
+
+func _sync_hq_modal() -> void:
+	for rid in _hq_cards.keys():
+		var rec: Dictionary = _hq_cards[rid]
+		var btn: Button = rec["btn"]
+		var ic: Icons = rec["icon"]
+		var nl: Label = rec["name"]
+		var sl: Label = rec["species"]
+		var sel: bool = (rid == GameState.hq_region)
+		btn.set_pressed_no_signal(sel)
+		btn.text = ""
+		nl.text = I18n.t("region." + str(rid) + ".name")
+		nl.add_theme_color_override("font_color", UITheme.HEALTHY.lerp(Color.WHITE, 0.25) if sel else UITheme.TEXT)
+		sl.text = "🐾 " + I18n.t("region." + str(rid) + ".species") + "  ·  " + I18n.t("region." + str(rid) + ".trait")
+		sl.add_theme_color_override("font_color", UITheme.AMBER if sel else UITheme.TEXT_DIM)
+		ic.set_icon("target" if sel else "globe", UITheme.HEALTHY if sel else UITheme.TEXT_DIM, 20.0)
+
+
+func _on_hq_selected(rid: String) -> void:
+	GameState.hq_region = rid
+	AudioSynth.play_click()
+	GameState.vibrate_light()
+	_sync_hq_modal()
+
+
+func _open_hq_modal() -> void:
+	if not RegionData.DEFS.has(GameState.hq_region):
+		GameState.hq_region = RegionData.HERO_ID
+	_sync_hq_modal()
+	_hq_modal.visible = true
+
+
+func _close_hq_modal() -> void:
+	AudioSynth.play_click()
+	GameState.vibrate_light()
+	_hq_modal.visible = false
+
+
+func _on_hq_confirmed() -> void:
+	AudioSynth.play_click()
+	GameState.vibrate_medium()
+	_hq_modal.visible = false
+	GameState.clear_save_game()
+	start_requested.emit()
+
+
 func _on_diff_selected(d_id: String) -> void:
 	GameState.selected_difficulty = d_id
 	AudioSynth.play_click()
@@ -1472,6 +1669,8 @@ func _on_diff_selected(d_id: String) -> void:
 func _update_diff_selection(d_id: String) -> void:
 	for k in _diff_buttons.keys():
 		var btn: Button = _diff_buttons[k]
+		var k_def: Dictionary = Balance.DIFFICULTIES.get(k, {})
+		btn.text = I18n.t(str(k_def.get("name_key", k)))
 		if k == d_id:
 			var c: Color = UITheme.HEALTHY if k == "cadet" else (UITheme.AMBER if k == "commander" else UITheme.CRISIS)
 			btn.add_theme_color_override("font_color", c)
@@ -1521,6 +1720,7 @@ func _on_language_changed(_lang: String) -> void:
 	_sync_lang_buttons()
 	_sync_continue_button()
 	_sync_achievements()
+	_sync_hq_modal()
 	_update_diff_selection(GameState.selected_difficulty)
 	_title_ctrl.queue_redraw()
 	if _mode == "main":

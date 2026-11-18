@@ -1284,7 +1284,7 @@ func _draw_caretta() -> void:
 		_stroke(egg, true, 0.45)
 
 
-## Mediterranean monk seal (streamlined body, flippers, tail).
+## Monk seal (streamlined body, flippers, tail).
 func _draw_seal() -> void:
 	var body: Array = _ellipse(Vector2(-0.06, 0.0), 0.62, 0.35, -0.15, 24)
 	_fill(body, 0.25)
@@ -1299,7 +1299,7 @@ func _draw_seal() -> void:
 	_dot(Vector2(-0.68, -0.16), 0.05, 1.0)
 
 
-## COP31 summits: laurel wreath around the sea.
+## Global Ocean summits: laurel wreath around the sea.
 func _draw_cop_summit() -> void:
 	var c := Vector2(0.0, -0.06)
 	_fill(_ellipse(c, 0.36, 0.36, 0.0, 24), 0.2)
@@ -1320,8 +1320,8 @@ func _draw_cop_summit() -> void:
 	_stroke([Vector2(-0.16, 0.72), Vector2(0.0, 0.62), Vector2(0.16, 0.72)], false, 0.7)
 
 
-## AQUASTASIS centerpiece procedural vector emblem: bioluminescent Mediterranean wave,
-## Caretta sea turtle & coral crest inside a shield ring transitioning from crisis red to turquoise.
+## AQUASTASIS centerpiece procedural vector emblem: bioluminescent ocean wave,
+## sea turtle & coral crest inside a shield ring transitioning from crisis red to turquoise.
 func _draw_aquastasis_logo() -> void:
 	var saved_col: Color = color
 	# Deep ocean backdrop disc
@@ -1349,7 +1349,7 @@ func _draw_aquastasis_logo() -> void:
 	_fill(_blade(Vector2(-0.34, 0.68), Vector2(-0.44, 0.34), Vector2(-0.32, 0.04), 0.05), 0.65)
 	_fill(_blade(Vector2(0.34, 0.68), Vector2(0.44, 0.34), Vector2(0.32, 0.04), 0.05), 0.65)
 
-	# Layered bioluminescent Mediterranean waves across lower basin
+	# Layered bioluminescent ocean waves across lower basin
 	color = UITheme.HEALTHY
 	_stroke(_wave(-0.72, 0.72, 0.46, 0.08, 2.0), false, 1.15)
 	_stroke(_wave(-0.62, 0.62, 0.62, 0.07, 1.5), false, 0.95)

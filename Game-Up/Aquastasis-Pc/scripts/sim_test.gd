@@ -38,7 +38,7 @@ func _init() -> void:
 
 func _run() -> void:
 	print("")
-	print("=== PULSE OF THE MEDITERRANEAN - simulation balance test (Phase 2) ===")
+	print("=== AQUASTASIS - simulation balance test (Phase 2) ===")
 	print("Full game: %d ticks x %.1f s = %.0f s at 1x (%d -> %d)" % [
 		B.TOTAL_TICKS, B.TICK_SECONDS, float(B.TOTAL_TICKS) * B.TICK_SECONDS / float(B.SPEEDS[1]),
 		B.START_YEAR, B.END_YEAR])
@@ -173,6 +173,9 @@ func _play(strategy: String, p_seed: int, timeline: bool) -> Dictionary:
 ## Answers a waiting decision card. "best": the most hopeful (highest tone) affordable choice;
 ## "free": the choice that costs nothing.
 func _answer_card(sim: CrisisSim, mode: String, st: Dictionary) -> void:
+	if not sim.pending_summit.is_empty():
+		var idx: int = 0 if mode == "free" else 1
+		sim.resolve_summit(idx)
 	if sim.pending_event.is_empty():
 		return
 	var def: Dictionary = _event_def(str(sim.pending_event.get("id", "")))

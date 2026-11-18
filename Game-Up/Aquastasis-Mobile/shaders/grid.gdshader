@@ -1,5 +1,5 @@
 // Tactical terrain shader shared by three opaque map layers (uniform "layer"):
-// 0 = deep-sea floor with a faint lat/lon grid, sonar ping from Antalya and vignette falloff,
+// 0 = deep-sea floor with a faint lat/lon grid, sonar ping from HQ and vignette falloff,
 // 1 = raised dark land slabs with faint topographic contours and terracotta cliff glow,
 // 2 = thin amber/terracotta glowing coastline ribbons.
 // Mesh contract (map_builder.gd): land UV.x = part (0 top, 2 wall), UV.y = wall depth 0..1;
@@ -20,8 +20,10 @@ uniform vec2 hero = vec2(16.7, 2.75);
 uniform float fade_near = 20.0;
 uniform float fade_far = 36.0;
 uniform float coast_energy = 2.2;
+uniform float world_width = 69.12;
 
 varying vec3 wpos;
+varying vec3 v_norm;
 
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -54,36 +56,49 @@ float line_mask(float coord, float width_px) {
 	return 1.0 - clamp(d / width_px, 0.0, 1.0);
 }
 
-// Geographic grid: lon = x + 14, lat = 39 - y / 1.3 (same projection as region.gd).
+// Geographic grid: inverse Miller projection centered at 155E (same as region.gd & build_world_map.gd).
 vec2 grid_masks(vec2 p) {
-	float lon = p.x + 14.0;
-	float lat = 39.0 - p.y / 1.3;
-	float major = max(line_mask(lon / 5.0, 1.1), line_mask(lat / 5.0, 1.1));
-	float minor = max(line_mask(lon, 0.8), line_mask(lat, 0.8));
+	float lon = p.x / 0.192 + 155.0;
+	float my = -p.y / 15.84079;
+	float lat = degrees(2.5 * atan(exp(clamp(my * 0.8, -4.0, 4.0))) - 1.9634954);
+	float major = max(line_mask(lon / 15.0, 1.1), line_mask(lat / 15.0, 1.1));
+	float minor = max(line_mask(lon / 5.0, 0.8), line_mask(lat / 5.0, 0.8));
 	return vec2(major, minor);
 }
 
 float vignette(vec2 p) {
-	float d = length((p - focus) * vec2(0.8, 1.0));
+	vec2 df = p - focus;
+	if (world_width > 0.0) {
+		float hw = world_width * 0.5;
+		df.x = mod(df.x + hw, world_width) - hw;
+	}
+	float d = length(df * vec2(0.8, 1.0));
 	return 1.0 - smoothstep(fade_near, fade_far, d);
 }
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_norm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 void fragment() {
 	vec2 p = wpos.xz;
 	float fade = vignette(p);
 	vec3 col;
+	vec3 sun_dir = normalize(vec3(-0.60, 0.66, -0.45));
 	if (layer == 0) {
 		// deep-sea floor
 		float n = fbm(p * 0.18 + vec2(TIME * 0.004, 0.0));
 		vec3 base = deep_color * (0.75 + 0.5 * n);
 		vec2 g = grid_masks(p);
-		col = base + grid_color * (g.x * 0.11 + g.y * 0.03);
-		// slow sonar ping expanding from the Antalya hero position
-		float r = length(p - hero);
+		col = base + grid_color * (g.x * 0.12 + g.y * 0.035);
+		// slow sonar ping expanding from the HQ hero position
+		vec2 dh = p - hero;
+		if (world_width > 0.0) {
+			float hw = world_width * 0.5;
+			dh.x = mod(dh.x + hw, world_width) - hw;
+		}
+		float r = length(dh);
 		float front = fract(TIME / 11.0) * 48.0;
 		float ping = exp(-abs(r - front) * 1.6) * (1.0 - front / 48.0);
 		col += ping_color * ping * 0.12;
@@ -92,20 +107,28 @@ void fragment() {
 		col *= 0.92 + 0.08 * scan;
 	} else if (layer == 1) {
 		if (UV.x < 1.0) {
-			// land top: dark slate relief (mobile-optimized single fbm evaluation)
-			vec2 o = vec2(5.2, 1.3);
-			float e0 = fbm(p * 0.35 + o);
-			float dx = dFdx(e0);
-			float dy = dFdy(e0);
-			float shade = clamp(0.65 - (dx + dy) * 12.0, 0.25, 1.0);
-			col = land_color * (0.55 + 0.55 * shade) * (0.82 + 0.32 * e0);
+			// 3D sculpted terrain top (mobile-efficient single fbm + analytic mesh slope normal)
+			float e0 = fbm(p * 0.42 + vec2(5.2, 1.3));
+			vec3 surf_n = normalize(v_norm + vec3(dFdx(e0) * 1.4, 0.0, dFdy(e0) * 1.4));
+			float elev = clamp((wpos.y - 0.72) / 1.35, 0.0, 1.0);
+			float ndl = dot(surf_n, sun_dir);
+			float shade = 0.48 + 0.85 * clamp(ndl, 0.0, 1.0) - 0.12 * clamp(-ndl, 0.0, 1.0);
+			vec3 lowland = land_color * 1.02;
+			vec3 upland = mix(lowland, land_color * 1.32 + vec3(0.032, 0.028, 0.025), smoothstep(0.12, 0.72, elev));
+			vec3 alpine = mix(upland, vec3(0.19, 0.22, 0.27), smoothstep(0.72, 1.0, elev));
+			col = alpine * shade * (0.86 + 0.24 * e0);
+			float contour = line_mask(wpos.y * 5.2, 0.75);
+			col += cliff_color * contour * 0.038;
 			vec2 g = grid_masks(p);
-			col += grid_color * (g.x * 0.035 + g.y * 0.008);
+			col += grid_color * (g.x * 0.038 + g.y * 0.01);
 		} else {
-			// cliff wall: terracotta glow under the coastline fading downward
+			// 3D extruded cliff wall: directional sunlit/shadowed facets + upper rim + abyssal base
 			float k = 1.0 - clamp(UV.y, 0.0, 1.0);
+			vec3 wn = normalize(v_norm);
+			float wlit = clamp(dot(wn, normalize(vec3(-0.62, 0.25, -0.74))), -0.5, 1.0);
+			float facet = 0.45 + 0.75 * max(wlit, 0.0) - 0.16 * max(-wlit, 0.0);
 			float k2 = k * k;
-			col = land_color * 0.55 + cliff_color * (k2 * k2 * k2) * 0.9;
+			col = land_color * facet * (0.35 + 0.65 * k) + cliff_color * (k2 * k2) * (0.65 + 0.55 * max(wlit, 0.0));
 		}
 	} else {
 		// coastline ribbon: hot core, gentle shimmer travelling along the coast

@@ -16,6 +16,7 @@ uniform float burst = -1.0;        // comet head position 0..1 along the arc, < 
 uniform float burst_dir = 1.0;     // +1 comet travels toward UV.x = 1, -1 toward 0
 uniform float intensity = 1.0;
 uniform float closed = 0.0;        // 1 = closed loop (selection marquee): no end fade
+uniform int layer_mode = 0;        // 0 = standard, 1 = threat & shield, 2 = bio-map
 
 void fragment() {
 	float u = UV.x;
@@ -39,8 +40,17 @@ void fragment() {
 	float packet = pow(k, 16.0) * 3.2 + smoothstep(0.975, 1.0, k) * 2.2;
 
 	float pulse = danger * (0.5 + 0.5 * sin(TIME * 6.0 - s * 1.1));
-	vec3 col = mix(color, hot_color, smoothstep(0.0, 0.55, danger));
-	float b = (body + packet) * intensity + pulse * 0.9;
+	float eff_danger = danger;
+	float layer_alpha = 1.0;
+	if (layer_mode == 1) {
+		eff_danger = clamp(danger * 1.45, 0.0, 1.0);
+		pulse = eff_danger * (0.65 + 0.35 * sin(TIME * 7.5 - s * 1.4));
+		layer_alpha = mix(0.32, 1.85, eff_danger);
+	} else if (layer_mode == 2) {
+		layer_alpha = 0.38;
+	}
+	vec3 col = mix(color, hot_color, smoothstep(0.0, 0.55, eff_danger));
+	float b = ((body + packet) * intensity + pulse * 0.9) * layer_alpha;
 
 	float comet = 0.0;
 	if (burst >= 0.0) {

@@ -19,6 +19,11 @@ signal action_performed(action_id: String, region_id: String)
 # --- Map interaction ---
 signal region_hovered(region_id: String)
 signal region_selected(region_id: String)
+signal map_layer_changed(layer: int)
+signal fleet_targeting_changed(active: bool)
+signal fleet_dispatched(from_id: String, to_id: String, path: Array, eta_ticks: int)
+signal fleet_arrived(to_id: String)
+signal combo_triggered(region_id: String, until_tick: int)
 
 # --- Feedback / UI ---
 ## severity: 0 = info, 1 = good news, 2 = warning, 3 = alarm (alarm also shakes the camera)
@@ -39,3 +44,9 @@ signal bubble_expired(bubble_id: int)
 signal news(text_key: String, args: Dictionary, tone: int)
 signal tree_toggle_requested()                           # any view asks main.gd to open/close the tree
 signal tree_toggled(is_open: bool)                       # the tree modal opened / closed
+signal summit_triggered(summit_data: Dictionary)
+signal summit_resolved(choice_idx: int)
+signal tutorial_requested()
+signal pause_menu_requested()
+signal achievement_unlocked(ach_id: String)
+signal difficulty_changed(diff_id: String)

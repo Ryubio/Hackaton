@@ -1,7 +1,7 @@
 extends Node3D
-## MapBuilder: builds the procedural 3D Mediterranean in code (deep-sea grid floor, raised land
-## slabs with glowing coastlines, 8 extruded sea regions with the sea shader, route arcs, the
-## Antalya hero beacon, labels), drives the camera (drift, parallax, shake) and polygon picking.
+## MapBuilder: builds the procedural 3D World Ocean in code (deep-sea grid floor, raised Natural Earth
+## land slabs with glowing coastlines, 12 extruded global sea regions with the sea shader, route arcs,
+## the dynamic HQ beacon, LOD labels), drives the camera and polygon picking.
 
 const RegionData := preload("res://scripts/region.gd")
 const UITheme := preload("res://scripts/ui_theme.gd")
@@ -11,17 +11,20 @@ const GRID_SHADER := preload("res://shaders/grid.gdshader")
 
 # --- Layout (map plane: x = east, z = south; see region.gd) ------------------------------
 const SEA_Y := 0.0
-const LAND_Y := 0.16
-const FLOOR_Y := -0.55
-const WALL_BOTTOM_Y := -0.54
+const LAND_Y := 0.76
+const FLOOR_Y := -1.35
+const WALL_BOTTOM_Y := -1.25
 const TOP_STEP := 1.50            # mobile-optimized interior grid spacing (40% fewer vertices)
+const LAND_RELIEF_STEP := 1.92    # 69.12 / 1.92 = 36 grid cells (exact wrap at +-HALF_W)
 const RIM_WIDTH := 0.1
 const RIM_LIFT := 0.015
 const COAST_WIDTH := 0.075
-const FAR_X := 38.0               # land outline points beyond these bounds are off-map closures:
-const FAR_Y := 22.0               # edges touching them get no wall and no coastline glow
-const HERO_POS := Vector2(16.72, 2.86)
-const ROUTE_END_GAP := 1.1        # route arcs start this far from the anchors (labels sit there)
+const WORLD_W := RegionData.WORLD_W  # 69.12 (exact 360-degree periodicity)
+const HALF_W := RegionData.HALF_W    # 34.56
+const SEAM_EPS := 0.03               # vertical seam edges on +-HALF_W skip walls/rims/coastlines
+const FAR_Y := 28.8                  # polar cap edges beyond +-FAR_Y get no wall/coastline glow
+const WRAP_TILES := [-1.0, 0.0, 1.0] # 3-copy horizontal tiling for seamless global wrap
+const ROUTE_END_GAP := 1.1           # route arcs start this far from the anchors (labels sit there)
 const BURST_TIME := 0.75          # seconds a spread comet needs to travel a route
 
 # --- Motion ---------------------------------------------------------------------------------
@@ -29,35 +32,24 @@ const SMOOTH_RATE := 2.2          # 1/s, uniforms follow region_changed targets
 const HOVER_RATE := 10.0
 const SHAKE_TIME := 0.4
 const SHAKE_UNITS := 0.55
-const CAM_FOV := 42.0
-const GAME_TARGET := Vector3(2.4, 0.0, 1.4)   # frames the full basin on unobstructed mobile screen
-const GAME_DIST := 48.5
-const GAME_PITCH := 55.0
-const MENU_TARGET := Vector3(2.4, 0.0, 1.9)     # wider cinematic framing, no panels
-const MENU_DIST := 42.0
-const MENU_PITCH := 50.0
+const CAM_FOV := 48.0
+const GAME_TARGET := Vector3(0.0, 0.2, 0.4)   # frames global 3D ocean cleanly clear of top/bottom HUDs
+const GAME_DIST := 46.5
+const GAME_PITCH := 43.0
+const MENU_TARGET := Vector3(0.0, 0.25, 1.0)     # dramatic oblique 3D framing, no panels
+const MENU_DIST := 40.0
+const MENU_PITCH := 39.0
 
 # --- Labels ---------------------------------------------------------------------------------
 const LABEL_PIXEL := 0.036
-const NAME_FONT_SIZE := 28
-const STATUS_FONT_SIZE := 19
-const LABEL_LIFT := 0.35
+const NAME_FONT_SIZE := 23
+const STATUS_FONT_SIZE := 15
+const LABEL_LIFT := 1.45
 const LABEL_PICK_PAD := 8.0       # font pixels of extra clickable margin around a label
-## Label offset from the region anchor (map units): keeps "Antalya Gulf" off the hero ring.
-const LABEL_OFFSET := {"antalya": Vector2(1.6, 0.2)}
+## Label offset from the region anchor (map units) to keep straits and the HQ ring clear.
+const LABEL_OFFSET := {"mediterranean": Vector2(-0.3, -0.8), "red_arabian": Vector2(0.35, 0.65), "coral_triangle": Vector2(0.0, 0.5), "east_asian": Vector2(-0.45, -0.45), "caribbean": Vector2(-0.45, 0.45), "arctic": Vector2(0.0, 2.3)}
 
-## Render-only outline refinements: extra water merged into a region's mesh, outline and
-## picking (the simulation never uses polygon area). The eastern Black Sea basin beyond the
-## region's straight cut at x ~21 would otherwise show the bare sea floor between the coasts.
-## Every new edge lies 0.1-0.2 units under the europe/asia land slabs.
-const REGION_EXTENSIONS := {
-	"blacksea": [
-		Vector2(20.4, -3.75), Vector2(21.0, -3.55), Vector2(21.9, -3.4), Vector2(22.35, -2.85),
-		Vector2(23.5, -2.6), Vector2(24.4, -2.42), Vector2(25.7, -2.47), Vector2(26.5, -2.5),
-		Vector2(27.85, -3.35), Vector2(27.7, -4.5), Vector2(26.6, -5.45), Vector2(25.1, -6.75),
-		Vector2(23.6, -7.55), Vector2(22.6, -8.45), Vector2(21.45, -8.25), Vector2(20.5, -7.5),
-	],
-}
+const REGION_EXTENSIONS := {}
 
 const BEACON_SHADER_CODE := """
 shader_type spatial;
@@ -101,179 +93,921 @@ void fragment() {
 }
 """
 
-## Hand-authored stylized land (x = lon - 14, y = (39 - lat) * 1.3; straits slightly widened to
-## match the region polygons). Points far outside the map close the continents off-screen.
+## Natural Earth 1:110m simplified land polygons in 360-deg periodic equirectangular
+## projection centered at 155E (generated by tools/build_world_map.gd).
 const LAND := [
-	# europe
 	[
-		Vector2(-44.0, -46.8), Vector2(-19.0, -16.9), Vector2(-18.5, -12.22), Vector2(-16.2, -10.66), Vector2(-15.2, -9.1),
-		Vector2(-15.5, -5.85), Vector2(-17.8, -5.79), Vector2(-22.0, -6.11), Vector2(-23.3, -5.46), Vector2(-22.9, -3.9),
-		Vector2(-22.7, -2.86), Vector2(-23.0, -1.3), Vector2(-23.5, 0.26), Vector2(-22.8, 1.3), Vector2(-23.0, 2.6),
-		Vector2(-21.9, 2.6), Vector2(-21.4, 2.34), Vector2(-20.3, 3.25), Vector2(-19.6, 3.7), Vector2(-19.35, 3.6),
-		Vector2(-18.4, 2.99), Vector2(-17.5, 2.96), Vector2(-16.45, 2.82), Vector2(-16.2, 2.96), Vector2(-15.6, 2.21),
-		Vector2(-14.98, 1.82), Vector2(-14.7, 1.78), Vector2(-14.48, 0.84), Vector2(-13.77, 0.35), Vector2(-14.33, -0.61),
-		Vector2(-14.0, -1.3), Vector2(-13.13, -2.21), Vector2(-12.75, -2.73), Vector2(-11.83, -3.09), Vector2(-10.8, -3.77),
-		Vector2(-10.7, -4.29), Vector2(-10.95, -4.81), Vector2(-10.9, -5.39), Vector2(-10.3, -5.72), Vector2(-9.4, -5.72),
-		Vector2(-8.63, -5.59), Vector2(-8.07, -5.33), Vector2(-7.36, -5.55), Vector2(-6.73, -6.11), Vector2(-5.8, -6.37),
-		Vector2(-5.07, -7.02), Vector2(-4.2, -6.63), Vector2(-3.7, -5.91), Vector2(-3.5, -5.14), Vector2(-2.8, -4.42),
-		Vector2(-2.2, -4.03), Vector2(-1.7, -3.51), Vector2(-1.0, -2.93), Vector2(-0.5, -2.89), Vector2(0.0, -2.47),
-		Vector2(0.25, -2.38), Vector2(0.4, -2.08), Vector2(0.8, -2.14), Vector2(0.95, -1.62), Vector2(1.6, -1.39),
-		Vector2(1.8, -0.78), Vector2(2.0, -0.46), Vector2(2.1, 0.06), Vector2(1.83, 0.49), Vector2(1.74, 0.98),
-		Vector2(1.7, 1.37), Vector2(2.06, 1.4), Vector2(2.5, 0.78), Vector2(2.6, 0.26), Vector2(3.13, -0.1),
-		Vector2(3.15, -0.52), Vector2(2.5, -0.98), Vector2(2.9, -1.69), Vector2(3.24, -1.91), Vector2(3.9, -1.69),
-		Vector2(3.99, -1.38), Vector2(4.36, -1.04), Vector2(4.49, -1.49), Vector2(3.94, -2.13), Vector2(2.87, -2.77),
-		Vector2(2.0, -3.19), Vector2(1.92, -3.42), Vector2(2.18, -3.74), Vector2(1.6, -3.8), Vector2(0.99, -3.9),
-		Vector2(0.21, -4.5), Vector2(-0.15, -5.07), Vector2(-0.48, -6.01), Vector2(-1.43, -6.58), Vector2(-1.7, -7.15),
-		Vector2(-1.5, -7.74), Vector2(-1.67, -8.37), Vector2(-0.9, -8.71), Vector2(-0.23, -8.64), Vector2(-0.4, -7.93),
-		Vector2(-0.15, -7.63), Vector2(0.2, -8.06), Vector2(0.44, -8.23), Vector2(0.9, -7.67), Vector2(1.23, -6.66),
-		Vector2(1.9, -5.98), Vector2(2.44, -5.86), Vector2(3.4, -5.2), Vector2(4.09, -4.74), Vector2(4.6, -4.42),
-		Vector2(5.1, -4.03), Vector2(5.5, -3.51), Vector2(5.45, -3.02), Vector2(5.4, -2.47), Vector2(5.49, -1.91),
-		Vector2(5.4, -1.69), Vector2(6.0, -1.13), Vector2(6.2, -0.65), Vector2(6.75, 0.05), Vector2(7.1, 0.78),
-		Vector2(7.7, 0.98), Vector2(7.15, 1.43), Vector2(7.6, 2.34), Vector2(7.67, 2.73), Vector2(8.0, 2.86),
-		Vector2(8.48, 3.41), Vector2(8.56, 2.93), Vector2(8.8, 3.12), Vector2(9.2, 3.33), Vector2(9.05, 3.0),
-		Vector2(8.86, 2.38), Vector2(8.8, 1.86), Vector2(9.15, 2.14), Vector2(9.5, 2.08), Vector2(9.0, 1.43),
-		Vector2(9.64, 1.38), Vector2(10.03, 1.76), Vector2(10.0, 1.3), Vector2(10.6, 1.3), Vector2(10.2, 0.65),
-		Vector2(9.5, 0.0), Vector2(9.0, -0.06), Vector2(9.2, -0.13), Vector2(9.2, -0.78), Vector2(8.6, -1.43),
-		Vector2(8.6, -1.95), Vector2(8.94, -2.12), Vector2(9.3, -1.56), Vector2(9.7, -1.24), Vector2(10.0, -1.43),
-		Vector2(10.4, -1.49), Vector2(9.9, -2.08), Vector2(10.4, -2.51), Vector2(11.3, -2.57), Vector2(11.88, -2.41),
-		Vector2(12.08, -2.24), Vector2(12.45, -2.15), Vector2(12.2, -2.08), Vector2(12.15, -1.4), Vector2(12.5, -1.75),
-		Vector2(12.75, -2.0), Vector2(13.1, -2.45), Vector2(13.5, -2.85), Vector2(14.25, -2.98), Vector2(14.95, -2.92),
-		Vector2(15.0, -3.15), Vector2(15.05, -3.45), Vector2(14.7, -3.6), Vector2(14.1, -3.95), Vector2(13.9, -4.68),
-		Vector2(13.95, -5.46), Vector2(14.6, -6.24), Vector2(14.65, -6.76), Vector2(15.6, -7.8), Vector2(16.2, -8.84),
-		Vector2(16.7, -9.75), Vector2(17.8, -9.88), Vector2(18.5, -9.23), Vector2(19.5, -8.97), Vector2(18.5, -8.32),
-		Vector2(19.5, -7.28), Vector2(20.1, -7.02), Vector2(21.4, -7.8), Vector2(22.6, -8.32), Vector2(23.5, -7.41),
-		Vector2(23.8, -7.28), Vector2(25.0, -6.63), Vector2(25.7, -5.98), Vector2(26.5, -5.33), Vector2(27.5, -4.42),
-		Vector2(27.65, -3.38), Vector2(61.0, -3.38), Vector2(61.0, -46.8),
+		Vector2(-9.40, -27.43), Vector2(-9.63, -27.28), Vector2(-9.22, -27.20), Vector2(-9.17, -26.91), Vector2(-8.99, -27.05),
+		Vector2(-8.43, -27.04), Vector2(-8.00, -26.76), Vector2(-7.85, -26.55), Vector2(-7.89, -26.26), Vector2(-8.61, -25.79),
+		Vector2(-8.76, -25.63), Vector2(-8.23, -25.42), Vector2(-8.06, -25.52), Vector2(-7.95, -25.19), Vector2(-7.88, -25.31),
+		Vector2(-7.57, -25.40), Vector2(-6.95, -25.31), Vector2(-6.91, -25.06), Vector2(-6.11, -24.98), Vector2(-6.09, -25.39),
+		Vector2(-5.69, -25.29), Vector2(-5.38, -25.30), Vector2(-5.07, -25.02), Vector2(-4.98, -24.68), Vector2(-5.10, -24.47),
+		Vector2(-4.85, -24.06), Vector2(-4.55, -23.86), Vector2(-4.37, -24.39), Vector2(-4.06, -24.16), Vector2(-3.73, -24.30),
+		Vector2(-3.36, -24.14), Vector2(-3.22, -24.28), Vector2(-2.90, -24.21), Vector2(-3.04, -24.69), Vector2(-2.79, -24.92),
+		Vector2(-1.06, -24.58), Vector2(-0.89, -24.27), Vector2(-0.39, -23.89), Vector2(0.39, -23.98), Vector2(0.77, -23.90),
+		Vector2(0.93, -23.69), Vector2(0.90, -23.33), Vector2(1.14, -23.19), Vector2(1.40, -23.29), Vector2(1.74, -23.30),
+		Vector2(2.10, -23.21), Vector2(2.46, -23.26), Vector2(2.80, -22.83), Vector2(3.04, -22.98), Vector2(2.88, -23.29),
+		Vector2(2.97, -23.51), Vector2(3.58, -23.38), Vector2(3.98, -23.41), Vector2(4.53, -23.17), Vector2(4.76, -22.99),
+		Vector2(4.81, -23.02), Vector2(5.82, -22.11), Vector2(6.40, -22.03), Vector2(6.79, -21.53), Vector2(6.56, -21.31),
+		Vector2(6.28, -21.27), Vector2(6.27, -20.85), Vector2(6.16, -20.73), Vector2(5.94, -20.75), Vector2(5.80, -20.91),
+		Vector2(5.52, -21.06), Vector2(5.49, -21.24), Vector2(5.33, -21.29), Vector2(5.08, -21.25), Vector2(4.96, -21.52),
+		Vector2(4.89, -21.48), Vector2(4.96, -21.28), Vector2(4.82, -21.04), Vector2(4.75, -21.06), Vector2(4.55, -20.90),
+		Vector2(4.31, -20.92), Vector2(4.48, -20.70), Vector2(4.59, -20.34), Vector2(4.68, -20.22), Vector2(4.70, -20.04),
+		Vector2(4.65, -19.93), Vector2(4.29, -20.02), Vector2(3.76, -19.70), Vector2(3.59, -19.65), Vector2(3.01, -19.10),
+		Vector2(2.94, -18.91), Vector2(2.67, -19.20), Vector2(2.17, -18.87), Vector2(2.08, -19.03), Vector2(1.90, -18.85),
+		Vector2(1.64, -18.91), Vector2(1.58, -18.64), Vector2(1.35, -18.24), Vector2(1.35, -18.08), Vector2(1.57, -17.99),
+		Vector2(1.55, -17.42), Vector2(1.37, -17.40), Vector2(1.29, -17.08), Vector2(1.37, -16.91), Vector2(1.03, -16.72),
+		Vector2(0.96, -16.29), Vector2(0.68, -16.19), Vector2(0.62, -15.82), Vector2(0.34, -15.47), Vector2(0.08, -17.11),
+		Vector2(0.18, -17.66), Vector2(0.34, -17.89), Vector2(0.35, -18.08), Vector2(0.65, -18.17), Vector2(1.32, -19.10),
+		Vector2(1.66, -19.43), Vector2(1.82, -20.03), Vector2(1.59, -20.00), Vector2(1.47, -19.65), Vector2(0.98, -19.19),
+		Vector2(0.83, -19.70), Vector2(0.33, -19.56), Vector2(-0.15, -18.86), Vector2(0.01, -18.61), Vector2(-0.72, -18.46),
+		Vector2(-0.70, -18.76), Vector2(-1.00, -18.82), Vector2(-1.24, -18.62), Vector2(-1.83, -18.69), Vector2(-2.46, -18.57),
+		Vector2(-3.82, -16.86), Vector2(-3.51, -16.82), Vector2(-3.42, -16.58), Vector2(-3.23, -16.49), Vector2(-3.11, -16.68),
+		Vector2(-2.90, -16.66), Vector2(-2.62, -16.24), Vector2(-2.62, -15.93), Vector2(-2.77, -15.56), Vector2(-2.87, -14.55),
+		Vector2(-3.16, -14.04), Vector2(-3.22, -13.80), Vector2(-3.87, -12.81), Vector2(-4.12, -12.61), Vector2(-4.24, -12.61),
+		Vector2(-4.36, -12.77), Vector2(-4.62, -12.53), Vector2(-4.65, -12.41), Vector2(-4.72, -12.43), Vector2(-4.86, -12.21),
+		Vector2(-4.86, -11.97), Vector2(-5.27, -11.60), Vector2(-5.30, -11.43), Vector2(-5.12, -11.23), Vector2(-4.90, -10.65),
+		Vector2(-4.90, -10.29), Vector2(-4.97, -10.11), Vector2(-5.15, -10.05), Vector2(-5.30, -9.92), Vector2(-5.47, -9.90),
+		Vector2(-5.46, -10.30), Vector2(-5.55, -10.63), Vector2(-5.40, -10.68), Vector2(-5.53, -10.96), Vector2(-5.63, -11.02),
+		Vector2(-5.71, -10.93), Vector2(-5.82, -11.07), Vector2(-5.72, -11.25), Vector2(-5.70, -11.54), Vector2(-5.90, -11.66),
+		Vector2(-6.17, -11.57), Vector2(-6.31, -11.41), Vector2(-6.52, -11.33), Vector2(-6.42, -11.48), Vector2(-6.46, -11.60),
+		Vector2(-6.30, -11.82), Vector2(-6.41, -11.99), Vector2(-6.79, -11.65), Vector2(-6.91, -11.44), Vector2(-7.10, -11.42),
+		Vector2(-7.19, -11.27), Vector2(-7.09, -11.06), Vector2(-6.94, -11.00), Vector2(-6.93, -10.86), Vector2(-6.78, -10.77),
+		Vector2(-6.56, -11.00), Vector2(-6.39, -10.87), Vector2(-6.27, -10.86), Vector2(-6.24, -10.70), Vector2(-6.51, -10.61),
+		Vector2(-6.60, -10.44), Vector2(-6.78, -10.28), Vector2(-6.88, -10.06), Vector2(-6.68, -9.89), Vector2(-6.48, -9.30),
+		Vector2(-6.35, -9.06), Vector2(-6.36, -8.84), Vector2(-6.48, -8.75), Vector2(-6.43, -8.59), Vector2(-6.32, -8.50),
+		Vector2(-6.40, -8.01), Vector2(-6.50, -7.99), Vector2(-6.98, -6.92), Vector2(-7.51, -6.41), Vector2(-7.73, -6.37),
+		Vector2(-7.84, -6.25), Vector2(-7.91, -6.34), Vector2(-8.02, -6.20), Vector2(-8.49, -6.01), Vector2(-8.55, -5.70),
+		Vector2(-8.66, -5.68), Vector2(-8.71, -5.89), Vector2(-8.67, -6.01), Vector2(-8.92, -6.10), Vector2(-9.27, -5.80),
+		Vector2(-9.43, -5.53), Vector2(-9.47, -5.33), Vector2(-9.15, -4.66), Vector2(-8.97, -4.48), Vector2(-8.86, -4.26),
+		Vector2(-8.77, -3.73), Vector2(-8.79, -3.24), Vector2(-9.17, -2.88), Vector2(-9.57, -2.38), Vector2(-9.64, -2.56),
+		Vector2(-9.59, -2.75), Vector2(-9.73, -2.91), Vector2(-9.89, -2.95), Vector2(-10.06, -3.39), Vector2(-10.24, -3.51),
+		Vector2(-10.40, -3.51), Vector2(-10.37, -3.73), Vector2(-10.54, -3.73), Vector2(-10.56, -3.42), Vector2(-10.72, -2.76),
+		Vector2(-10.71, -2.56), Vector2(-10.58, -2.55), Vector2(-10.47, -2.06), Vector2(-10.36, -1.90), Vector2(-10.25, -1.87),
+		Vector2(-9.91, -1.34), Vector2(-9.89, -0.77), Vector2(-9.75, -0.36), Vector2(-9.88, -0.34), Vector2(-10.29, -0.76),
+		Vector2(-10.52, -1.47), Vector2(-10.54, -1.79), Vector2(-10.85, -2.30), Vector2(-10.88, -2.16), Vector2(-10.86, -2.96),
+		Vector2(-10.80, -3.18), Vector2(-10.86, -3.34), Vector2(-10.85, -3.65), Vector2(-10.99, -4.13), Vector2(-11.02, -4.49),
+		Vector2(-11.10, -4.72), Vector2(-11.45, -4.38), Vector2(-11.68, -4.47), Vector2(-11.61, -4.82), Vector2(-11.65, -5.09),
+		Vector2(-11.80, -5.42), Vector2(-11.78, -5.52), Vector2(-11.89, -5.56), Vector2(-12.08, -5.95), Vector2(-12.21, -6.40),
+		Vector2(-12.38, -6.41), Vector2(-12.37, -6.29), Vector2(-12.43, -6.13), Vector2(-12.51, -6.19), Vector2(-12.54, -6.14),
+		Vector2(-12.67, -6.20), Vector2(-12.69, -6.09), Vector2(-13.06, -6.03), Vector2(-13.05, -5.82), Vector2(-13.15, -5.65),
+		Vector2(-13.43, -5.45), Vector2(-13.79, -4.94), Vector2(-13.98, -4.75), Vector2(-13.98, -4.62), Vector2(-14.34, -4.43),
+		Vector2(-14.40, -4.22), Vector2(-14.35, -3.62), Vector2(-14.43, -3.35), Vector2(-14.43, -2.87), Vector2(-14.53, -2.86),
+		Vector2(-14.61, -2.65), Vector2(-14.56, -2.56), Vector2(-14.73, -2.48), Vector2(-14.87, -2.21), Vector2(-15.05, -2.47),
+		Vector2(-15.39, -3.54), Vector2(-15.47, -4.07), Vector2(-15.64, -4.46), Vector2(-15.81, -5.99), Vector2(-16.09, -5.82),
+		Vector2(-16.23, -5.86), Vector2(-16.48, -6.21), Vector2(-16.39, -6.31), Vector2(-16.67, -6.67), Vector2(-16.81, -6.75),
+		Vector2(-16.87, -6.96), Vector2(-17.02, -7.18), Vector2(-17.95, -7.08), Vector2(-18.74, -7.27), Vector2(-18.82, -7.85),
+		Vector2(-18.91, -7.90), Vector2(-19.49, -7.59), Vector2(-19.68, -7.82), Vector2(-19.87, -7.91), Vector2(-20.14, -8.59),
+		Vector2(-20.24, -8.54), Vector2(-20.36, -8.64), Vector2(-20.43, -8.53), Vector2(-20.55, -8.54), Vector2(-20.39, -7.85),
+		Vector2(-20.13, -7.56), Vector2(-20.11, -7.24), Vector2(-20.01, -7.05), Vector2(-19.97, -7.35), Vector2(-19.91, -7.39),
+		Vector2(-19.85, -7.29), Vector2(-19.89, -6.95), Vector2(-19.82, -6.77), Vector2(-19.39, -6.80), Vector2(-19.26, -7.00),
+		Vector2(-19.12, -6.98), Vector2(-18.91, -7.24), Vector2(-18.93, -7.03), Vector2(-18.74, -6.73), Vector2(-18.48, -6.64),
+		Vector2(-18.35, -6.37), Vector2(-18.28, -6.34), Vector2(-18.53, -5.73), Vector2(-18.62, -5.74), Vector2(-18.69, -5.53),
+		Vector2(-18.68, -5.30), Vector2(-18.77, -5.30), Vector2(-18.89, -5.19), Vector2(-18.95, -4.99), Vector2(-19.07, -5.00),
+		Vector2(-19.15, -4.92), Vector2(-19.15, -4.81), Vector2(-19.24, -4.73), Vector2(-19.35, -4.76), Vector2(-19.70, -4.57),
+		Vector2(-19.74, -4.35), Vector2(-20.24, -4.10), Vector2(-20.41, -3.90), Vector2(-20.56, -3.90), Vector2(-20.79, -3.73),
+		Vector2(-21.00, -3.70), Vector2(-21.12, -3.53), Vector2(-21.10, -3.71), Vector2(-21.28, -3.69), Vector2(-21.35, -4.10),
+		Vector2(-21.52, -4.12), Vector2(-21.58, -4.24), Vector2(-21.57, -4.68), Vector2(-21.85, -5.22), Vector2(-21.90, -5.46),
+		Vector2(-22.12, -5.70), Vector2(-22.25, -5.98), Vector2(-22.26, -6.35), Vector2(-22.46, -6.79), Vector2(-22.56, -6.85),
+		Vector2(-23.01, -7.97), Vector2(-23.11, -7.96), Vector2(-23.07, -8.37), Vector2(-23.25, -7.84), Vector2(-23.40, -8.07),
+		Vector2(-23.55, -8.48), Vector2(-23.08, -7.07), Vector2(-22.91, -6.74), Vector2(-22.94, -6.50), Vector2(-22.68, -6.18),
+		Vector2(-22.62, -5.90), Vector2(-22.66, -5.84), Vector2(-22.56, -5.21), Vector2(-22.39, -5.03), Vector2(-22.22, -4.44),
+		Vector2(-21.75, -3.87), Vector2(-21.78, -3.53), Vector2(-21.58, -3.26), Vector2(-21.58, -3.14), Vector2(-21.69, -3.08),
+		Vector2(-21.61, -3.00), Vector2(-21.41, -3.13), Vector2(-21.29, -2.90), Vector2(-20.11, -3.24), Vector2(-20.02, -3.34),
+		Vector2(-19.95, -3.34), Vector2(-20.05, -2.55), Vector2(-20.43, -1.48), Vector2(-20.82, -0.79), Vector2(-21.48, -0.08),
+		Vector2(-21.78, 0.47), Vector2(-21.91, 0.58), Vector2(-21.96, 0.69), Vector2(-22.03, 0.71), Vector2(-22.16, 1.20),
+		Vector2(-22.23, 1.29), Vector2(-22.32, 1.64), Vector2(-22.31, 1.79), Vector2(-22.19, 1.89), Vector2(-22.24, 2.35),
+		Vector2(-21.99, 2.99), Vector2(-21.93, 4.09), Vector2(-22.06, 4.49), Vector2(-22.19, 4.67), Vector2(-22.58, 4.91),
+		Vector2(-23.08, 5.54), Vector2(-23.10, 5.75), Vector2(-22.94, 6.49), Vector2(-22.97, 6.63), Vector2(-22.92, 6.68),
+		Vector2(-23.03, 6.90), Vector2(-23.51, 7.27), Vector2(-23.49, 7.40), Vector2(-23.44, 7.42), Vector2(-23.58, 8.17),
+		Vector2(-24.34, 9.39), Vector2(-24.69, 9.66), Vector2(-24.79, 9.67), Vector2(-24.81, 9.76), Vector2(-24.93, 9.71),
+		Vector2(-25.02, 9.77), Vector2(-25.23, 9.71), Vector2(-25.43, 9.73), Vector2(-25.79, 9.90), Vector2(-25.91, 10.02),
+		Vector2(-25.99, 10.03), Vector2(-26.23, 9.82), Vector2(-26.32, 9.35), Vector2(-26.26, 9.29), Vector2(-26.26, 9.05),
+		Vector2(-26.84, 7.68), Vector2(-27.02, 6.21), Vector2(-27.34, 5.33), Vector2(-27.50, 5.05), Vector2(-27.50, 4.40),
+		Vector2(-27.31, 3.65), Vector2(-27.14, 3.34), Vector2(-27.13, 2.98), Vector2(-27.28, 2.48), Vector2(-27.22, 2.37),
+		Vector2(-27.47, 1.39), Vector2(-27.95, 0.59), Vector2(-28.06, 0.22), Vector2(-27.94, -0.28), Vector2(-27.97, -0.32),
+		Vector2(-27.88, -0.85), Vector2(-27.95, -1.03), Vector2(-28.04, -1.08), Vector2(-28.13, -1.32), Vector2(-28.33, -1.22),
+		Vector2(-28.40, -1.24), Vector2(-28.47, -1.17), Vector2(-28.63, -1.18), Vector2(-28.93, -1.74), Vector2(-29.40, -1.70),
+		Vector2(-30.14, -1.30), Vector2(-30.65, -1.43), Vector2(-31.29, -1.21), Vector2(-31.49, -1.34), Vector2(-32.25, -2.16),
+		Vector2(-32.67, -3.06), Vector2(-32.96, -3.44), Vector2(-32.97, -3.78), Vector2(-33.05, -4.00), Vector2(-33.14, -4.10),
+		Vector2(-33.06, -4.16), Vector2(-32.92, -4.50), Vector2(-32.89, -5.63), Vector2(-33.04, -5.89), Vector2(-33.02, -6.15),
+		Vector2(-32.88, -6.38), Vector2(-32.83, -6.68), Vector2(-32.66, -6.92), Vector2(-32.53, -7.43), Vector2(-32.40, -7.54),
+		Vector2(-32.18, -7.96), Vector2(-32.00, -7.99), Vector2(-31.60, -8.53), Vector2(-31.64, -8.91), Vector2(-31.55, -9.33),
+		Vector2(-31.42, -9.54), Vector2(-30.96, -9.94), Vector2(-30.90, -10.14), Vector2(-30.76, -10.14), Vector2(-30.64, -10.00),
+		Vector2(-30.46, -10.21), Vector2(-30.18, -10.14), Vector2(-29.99, -10.31), Vector2(-29.78, -10.37), Vector2(-29.48, -10.59),
+		Vector2(-28.84, -10.67), Vector2(-28.74, -10.63), Vector2(-28.56, -10.75), Vector2(-28.35, -10.76), Vector2(-28.27, -10.68),
+		Vector2(-27.93, -10.83), Vector2(-27.80, -10.79), Vector2(-27.79, -10.64), Vector2(-27.64, -10.75), Vector2(-27.73, -10.38),
+		Vector2(-27.66, -10.31), Vector2(-27.68, -10.03), Vector2(-27.81, -9.88), Vector2(-27.77, -9.71), Vector2(-27.68, -9.70),
+		Vector2(-27.63, -9.56), Vector2(-27.33, -9.40), Vector2(-27.09, -9.38), Vector2(-26.83, -9.24), Vector2(-26.74, -8.97),
+		Vector2(-26.30, -8.78), Vector2(-26.10, -8.63), Vector2(-25.91, -8.85), Vector2(-25.95, -9.08), Vector2(-25.76, -9.37),
+		Vector2(-25.62, -9.42), Vector2(-25.36, -9.35), Vector2(-25.30, -9.22), Vector2(-24.98, -9.13), Vector2(-24.93, -9.03),
+		Vector2(-24.67, -9.03), Vector2(-24.21, -8.81), Vector2(-23.98, -9.00), Vector2(-23.68, -8.98), Vector2(-23.61, -8.85),
+		Vector2(-23.58, -8.93), Vector2(-23.28, -8.84), Vector2(-23.09, -9.18), Vector2(-22.85, -9.98), Vector2(-22.87, -10.22),
+		Vector2(-22.82, -10.34), Vector2(-22.89, -10.49), Vector2(-22.84, -10.60), Vector2(-22.93, -10.58), Vector2(-23.09, -10.65),
+		Vector2(-23.23, -10.47), Vector2(-23.52, -10.43), Vector2(-23.67, -10.60), Vector2(-23.88, -10.62), Vector2(-23.92, -10.48),
+		Vector2(-24.06, -10.45), Vector2(-24.24, -10.62), Vector2(-24.45, -10.61), Vector2(-24.57, -10.93), Vector2(-24.71, -11.10),
+		Vector2(-24.44, -11.61), Vector2(-24.14, -11.62), Vector2(-24.06, -11.87), Vector2(-23.69, -11.83), Vector2(-23.55, -12.25),
+		Vector2(-23.33, -12.35), Vector2(-23.01, -12.35), Vector2(-22.40, -11.99), Vector2(-22.17, -12.04), Vector2(-22.01, -12.02),
+		Vector2(-21.78, -12.19), Vector2(-21.75, -12.33), Vector2(-21.80, -12.56), Vector2(-22.33, -13.11), Vector2(-22.55, -13.23),
+		Vector2(-22.72, -13.44), Vector2(-22.58, -13.49), Vector2(-22.42, -13.78), Vector2(-22.53, -13.92), Vector2(-22.24, -14.06),
+		Vector2(-22.25, -14.13), Vector2(-22.57, -14.05), Vector2(-22.70, -13.94), Vector2(-22.88, -13.92), Vector2(-23.05, -13.79),
+		Vector2(-23.04, -13.57), Vector2(-22.94, -13.49), Vector2(-22.75, -13.51), Vector2(-22.78, -13.39), Vector2(-22.99, -13.33),
+		Vector2(-23.25, -13.13), Vector2(-23.36, -13.20), Vector2(-23.32, -13.36), Vector2(-23.53, -13.46), Vector2(-23.31, -13.64),
+		Vector2(-23.37, -13.72), Vector2(-23.67, -13.81), Vector2(-23.68, -13.94), Vector2(-23.86, -13.90), Vector2(-24.08, -13.45),
+		Vector2(-24.07, -13.36), Vector2(-24.16, -13.29), Vector2(-24.22, -13.32), Vector2(-24.28, -12.91), Vector2(-24.45, -12.53),
+		Vector2(-24.40, -12.40), Vector2(-24.28, -12.32), Vector2(-24.32, -12.24), Vector2(-24.54, -12.23), Vector2(-24.79, -11.95),
+		Vector2(-24.86, -12.08), Vector2(-24.87, -11.96), Vector2(-24.97, -11.99), Vector2(-25.21, -11.91), Vector2(-25.07, -11.72),
+		Vector2(-25.28, -11.67), Vector2(-25.39, -11.83), Vector2(-25.37, -11.57), Vector2(-25.28, -11.42), Vector2(-25.35, -11.35),
+		Vector2(-25.15, -11.11), Vector2(-25.14, -10.93), Vector2(-25.32, -10.99), Vector2(-25.27, -10.85), Vector2(-25.39, -10.81),
+		Vector2(-25.31, -10.53), Vector2(-25.44, -10.53), Vector2(-25.60, -10.67), Vector2(-25.93, -11.66), Vector2(-26.03, -11.77),
+		Vector2(-26.04, -12.30), Vector2(-26.51, -12.75), Vector2(-26.69, -12.85), Vector2(-26.90, -13.26), Vector2(-26.90, -13.38),
+		Vector2(-27.02, -13.43), Vector2(-27.08, -13.28), Vector2(-27.10, -13.56), Vector2(-27.24, -13.60), Vector2(-27.39, -13.48),
+		Vector2(-27.41, -13.22), Vector2(-27.34, -13.04), Vector2(-27.16, -12.87), Vector2(-27.07, -12.59), Vector2(-26.85, -12.33),
+		Vector2(-26.70, -12.33), Vector2(-26.66, -12.26), Vector2(-26.71, -12.19), Vector2(-26.21, -11.74), Vector2(-26.25, -11.62),
+		Vector2(-26.35, -11.77), Vector2(-26.52, -11.83), Vector2(-26.60, -11.62), Vector2(-26.46, -11.50), Vector2(-26.49, -11.33),
+		Vector2(-26.57, -11.31), Vector2(-26.67, -11.03), Vector2(-26.75, -11.01), Vector2(-26.67, -11.35), Vector2(-26.80, -11.70),
+		Vector2(-26.88, -11.74), Vector2(-26.94, -11.88), Vector2(-27.06, -11.94), Vector2(-27.14, -12.07), Vector2(-27.29, -12.09),
+		Vector2(-27.74, -12.65), Vector2(-27.80, -12.98), Vector2(-28.05, -13.14), Vector2(-28.51, -12.72), Vector2(-28.89, -12.81),
+		Vector2(-29.16, -12.70), Vector2(-29.18, -12.31), Vector2(-29.36, -12.09), Vector2(-29.60, -12.02), Vector2(-29.81, -11.46),
+		Vector2(-29.74, -11.27), Vector2(-29.85, -11.13), Vector2(-29.89, -10.92), Vector2(-30.04, -10.86), Vector2(-30.17, -10.61),
+		Vector2(-30.60, -10.62), Vector2(-30.72, -10.69), Vector2(-30.79, -10.57), Vector2(-30.89, -10.60), Vector2(-30.96, -10.71),
+		Vector2(-31.19, -10.75), Vector2(-31.27, -10.67), Vector2(-31.37, -10.71), Vector2(-31.47, -10.68), Vector2(-31.46, -11.12),
+		Vector2(-31.54, -11.15), Vector2(-31.57, -11.49), Vector2(-31.45, -12.07), Vector2(-31.49, -12.54), Vector2(-31.56, -12.68),
+		Vector2(-31.29, -12.93), Vector2(-30.59, -12.81), Vector2(-30.13, -12.82), Vector2(-30.03, -13.02), Vector2(-29.99, -13.70),
+		Vector2(-30.33, -14.24), Vector2(-30.62, -14.38), Vector2(-30.64, -14.64), Vector2(-30.39, -14.71), Vector2(-30.07, -14.62),
+		Vector2(-30.13, -15.03), Vector2(-29.95, -14.87), Vector2(-29.50, -15.15), Vector2(-29.45, -15.45), Vector2(-29.12, -15.60),
+		Vector2(-29.02, -15.70), Vector2(-28.86, -16.24), Vector2(-28.59, -16.40), Vector2(-28.43, -16.39), Vector2(-28.40, -16.47),
+		Vector2(-28.24, -16.49), Vector2(-28.19, -16.42), Vector2(-28.07, -16.59), Vector2(-28.20, -17.17), Vector2(-28.17, -17.67),
+		Vector2(-28.12, -17.79), Vector2(-27.95, -17.82), Vector2(-27.73, -18.04), Vector2(-27.77, -17.59), Vector2(-27.66, -17.53),
+		Vector2(-27.71, -17.39), Vector2(-27.77, -17.43), Vector2(-27.91, -17.15), Vector2(-27.85, -16.81), Vector2(-27.66, -16.72),
+		Vector2(-27.66, -16.59), Vector2(-27.46, -16.66), Vector2(-27.36, -16.77), Vector2(-27.05, -16.49), Vector2(-26.38, -16.91),
+		Vector2(-26.18, -16.85), Vector2(-26.17, -16.75), Vector2(-25.99, -16.75), Vector2(-25.94, -16.92), Vector2(-25.68, -17.04),
+		Vector2(-25.71, -17.66), Vector2(-25.62, -17.91), Vector2(-25.44, -18.05), Vector2(-25.28, -17.75), Vector2(-25.13, -17.76),
+		Vector2(-25.08, -18.29), Vector2(-25.14, -18.25), Vector2(-25.26, -18.39), Vector2(-25.28, -18.63), Vector2(-24.79, -18.80),
+		Vector2(-24.59, -18.73), Vector2(-24.39, -18.74), Vector2(-24.17, -18.97), Vector2(-24.37, -19.17), Vector2(-24.72, -19.13),
+		Vector2(-25.37, -18.90), Vector2(-25.48, -19.12), Vector2(-25.67, -19.26), Vector2(-25.62, -19.67), Vector2(-25.72, -20.06),
+		Vector2(-25.45, -20.59), Vector2(-24.88, -21.16), Vector2(-24.90, -21.35), Vector2(-25.17, -21.57), Vector2(-25.50, -21.44),
+		Vector2(-25.69, -21.12), Vector2(-25.66, -20.85), Vector2(-26.33, -20.12), Vector2(-26.47, -19.52), Vector2(-26.34, -19.22),
+		Vector2(-26.15, -18.99), Vector2(-26.33, -18.53), Vector2(-26.53, -18.44), Vector2(-26.60, -17.76), Vector2(-26.71, -17.40),
+		Vector2(-26.94, -17.43), Vector2(-27.05, -17.13), Vector2(-27.27, -17.11), Vector2(-27.34, -17.47), Vector2(-27.64, -18.49),
+		Vector2(-27.77, -18.74), Vector2(-28.15, -18.27), Vector2(-28.41, -18.18), Vector2(-28.67, -18.38), Vector2(-28.80, -19.79),
+		Vector2(-28.62, -20.06), Vector2(-28.12, -20.43), Vector2(-27.74, -20.88), Vector2(-26.93, -22.41), Vector2(-26.08, -23.38),
+		Vector2(-25.66, -23.59), Vector2(-25.34, -23.57), Vector2(-25.05, -23.98), Vector2(-24.70, -23.96), Vector2(-24.35, -24.06),
+		Vector2(-23.75, -23.69), Vector2(-24.00, -23.56), Vector2(-23.79, -23.25), Vector2(-23.59, -23.42), Vector2(-23.28, -23.12),
+		Vector2(-22.75, -23.01), Vector2(-22.02, -22.46), Vector2(-21.88, -22.24), Vector2(-21.86, -21.93), Vector2(-22.08, -21.69),
+		Vector2(-22.39, -21.56), Vector2(-23.25, -21.91), Vector2(-23.39, -21.86), Vector2(-23.08, -21.52), Vector2(-23.05, -20.85),
+		Vector2(-22.65, -20.61), Vector2(-22.63, -20.81), Vector2(-22.75, -21.01), Vector2(-22.62, -21.18), Vector2(-22.16, -20.90),
+		Vector2(-22.00, -21.01), Vector2(-22.13, -21.34), Vector2(-21.68, -21.78), Vector2(-21.50, -21.76), Vector2(-21.32, -21.60),
+		Vector2(-21.21, -21.91), Vector2(-21.37, -22.19), Vector2(-21.28, -22.47), Vector2(-21.42, -22.77), Vector2(-20.88, -22.62),
+		Vector2(-20.77, -22.35), Vector2(-21.01, -22.29), Vector2(-21.01, -22.03), Vector2(-20.86, -21.87), Vector2(-20.56, -21.97),
+		Vector2(-20.52, -22.27), Vector2(-19.45, -22.91), Vector2(-19.30, -22.88), Vector2(-19.49, -22.59), Vector2(-19.25, -22.54),
+		Vector2(-19.11, -22.71), Vector2(-18.76, -22.72), Vector2(-18.47, -22.92), Vector2(-18.25, -22.63), Vector2(-18.03, -22.95),
+		Vector2(-18.23, -23.23), Vector2(-18.13, -23.39), Vector2(-17.57, -23.24), Vector2(-16.61, -22.54), Vector2(-16.48, -22.79),
+		Vector2(-16.67, -23.05), Vector2(-16.68, -23.15), Vector2(-16.91, -23.20), Vector2(-16.85, -23.43), Vector2(-16.95, -23.98),
+		Vector2(-16.60, -24.44), Vector2(-16.47, -24.92), Vector2(-16.33, -25.02), Vector2(-15.82, -24.88), Vector2(-15.78, -24.59),
+		Vector2(-15.97, -24.17), Vector2(-15.85, -24.01), Vector2(-15.78, -23.66), Vector2(-15.83, -22.99), Vector2(-15.62, -22.69),
+		Vector2(-15.70, -22.37), Vector2(-16.07, -21.71), Vector2(-15.85, -21.64), Vector2(-15.78, -21.81), Vector2(-15.57, -21.93),
+		Vector2(-15.52, -22.16), Vector2(-15.35, -22.38), Vector2(-15.46, -22.65), Vector2(-15.37, -22.97), Vector2(-15.58, -23.01),
+		Vector2(-15.63, -23.28), Vector2(-15.48, -23.78), Vector2(-15.72, -24.19), Vector2(-15.38, -24.54), Vector2(-15.43, -24.91),
+		Vector2(-15.33, -24.92), Vector2(-15.23, -24.63), Vector2(-15.30, -24.14), Vector2(-15.10, -24.06), Vector2(-15.19, -24.41),
+		Vector2(-14.87, -24.61), Vector2(-14.47, -24.64), Vector2(-14.13, -24.38), Vector2(-14.28, -24.78), Vector2(-14.30, -25.34),
+		Vector2(-13.97, -25.45), Vector2(-13.51, -25.43), Vector2(-13.09, -25.50), Vector2(-13.25, -25.78), Vector2(-13.02, -26.14),
+		Vector2(-12.80, -26.16), Vector2(-12.43, -26.43), Vector2(-11.92, -26.51), Vector2(-11.86, -26.66), Vector2(-11.35, -26.72),
+		Vector2(-11.20, -26.59), Vector2(-10.77, -26.89), Vector2(-10.41, -26.88), Vector2(-10.36, -27.13), Vector2(-10.18, -27.38),
+		Vector2(-9.72, -27.62),
 	],
-	# asia / africa
 	[
-		Vector2(27.65, -3.38), Vector2(26.5, -2.64), Vector2(25.7, -2.6), Vector2(24.4, -2.54), Vector2(23.5, -2.73),
-		Vector2(22.33, -2.98), Vector2(21.9, -3.51), Vector2(21.15, -3.93), Vector2(20.0, -3.87), Vector2(19.3, -3.9),
-		Vector2(18.4, -3.58), Vector2(17.8, -3.6), Vector2(17.4, -3.45), Vector2(16.6, -3.4), Vector2(15.9, -3.45),
-		Vector2(15.3, -3.55), Vector2(15.27, -3.15), Vector2(15.2, -2.88), Vector2(15.6, -2.68), Vector2(16.15, -2.55),
-		Vector2(15.65, -2.35), Vector2(15.2, -2.2), Vector2(15.15, -1.85), Vector2(14.8, -1.6), Vector2(14.0, -1.5),
-		Vector2(13.85, -1.75), Vector2(13.35, -1.62), Vector2(12.85, -1.75), Vector2(12.55, -1.45), Vector2(12.25, -1.15),
-		Vector2(12.15, -0.65), Vector2(12.9, -0.71), Vector2(12.7, -0.39), Vector2(12.85, 0.06), Vector2(13.15, 0.75),
-		Vector2(12.4, 0.52), Vector2(12.3, 0.88), Vector2(12.8, 1.04), Vector2(13.25, 1.49), Vector2(13.3, 2.08),
-		Vector2(13.4, 2.56), Vector2(14.0, 2.6), Vector2(13.4, 2.99), Vector2(14.27, 2.79), Vector2(15.1, 3.06),
-		Vector2(15.65, 3.64), Vector2(16.4, 3.51), Vector2(16.7, 2.76), Vector2(17.4, 2.93), Vector2(18.0, 3.21),
-		Vector2(18.83, 3.87), Vector2(19.9, 3.44), Vector2(20.63, 2.86), Vector2(21.4, 3.16), Vector2(22.0, 2.73),
-		Vector2(22.17, 3.15), Vector2(21.9, 3.38), Vector2(21.95, 3.81), Vector2(21.78, 4.52), Vector2(21.87, 5.33),
-		Vector2(21.84, 5.93), Vector2(21.5, 6.63), Vector2(21.2, 7.45), Vector2(20.98, 8.03), Vector2(20.77, 9.0),
-		Vector2(20.45, 9.72), Vector2(19.8, 10.23), Vector2(18.3, 10.05), Vector2(17.8, 9.75), Vector2(16.4, 9.79),
-		Vector2(15.9, 10.14), Vector2(14.95, 10.62), Vector2(13.25, 9.94), Vector2(11.15, 9.62), Vector2(9.95, 9.0),
-		Vector2(8.64, 8.1), Vector2(8.0, 7.93), Vector2(6.07, 8.94), Vector2(6.1, 10.59), Vector2(5.0, 11.31),
-		Vector2(2.6, 10.14), Vector2(1.5, 9.75), Vector2(1.2, 8.61), Vector2(0.3, 8.26), Vector2(-0.82, 7.93),
-		Vector2(-1.92, 7.89), Vector2(-3.1, 6.76), Vector2(-3.9, 6.66), Vector2(-3.24, 5.54), Vector2(-2.94, 4.55),
-		Vector2(-3.36, 4.12), Vector2(-3.4, 3.38), Vector2(-2.95, 2.5), Vector2(-3.8, 2.86), Vector2(-4.13, 2.25),
-		Vector2(-5.25, 2.66), Vector2(-6.23, 2.73), Vector2(-7.1, 2.76), Vector2(-8.92, 2.93), Vector2(-10.95, 2.9),
-		Vector2(-12.7, 3.25), Vector2(-14.64, 4.29), Vector2(-15.9, 5.07), Vector2(-16.94, 4.81), Vector2(-17.93, 4.88),
-		Vector2(-19.36, 4.46), Vector2(-19.3, 4.12), Vector2(-19.8, 4.24), Vector2(-19.92, 4.17), Vector2(-20.15, 4.94),
-		Vector2(-20.85, 6.5), Vector2(-21.6, 7.02), Vector2(-23.6, 11.05), Vector2(-23.8, 13.0), Vector2(-27.0, 14.95),
-		Vector2(-30.0, 22.1), Vector2(-44.0, 50.7), Vector2(61.0, 50.7), Vector2(61.0, -3.38),
+		Vector2(8.40, 28.03), Vector2(8.74, 28.41), Vector2(8.17, 28.41), Vector2(7.93, 28.16), Vector2(8.04, 27.93),
 	],
-	# sicily
 	[
-		Vector2(-1.57, 1.56), Vector2(-1.4, 1.17), Vector2(-0.65, 1.13), Vector2(0.0, 1.26), Vector2(1.0, 1.11),
-		Vector2(1.45, 0.98), Vector2(1.1, 1.95), Vector2(1.3, 2.47), Vector2(1.1, 3.02), Vector2(0.5, 2.93),
-		Vector2(-0.1, 2.47), Vector2(-0.9, 1.95), Vector2(-1.4, 1.76),
+		Vector2(30.69, 27.83), Vector2(30.93, 28.09), Vector2(31.01, 28.41), Vector2(29.69, 28.41), Vector2(30.02, 27.83),
+		Vector2(30.11, 27.83), Vector2(30.40, 27.70),
 	],
-	# sardinia
 	[
-		Vector2(-4.85, -2.93), Vector2(-4.4, -2.47), Vector2(-4.25, -1.3), Vector2(-4.4, -0.26), Vector2(-4.9, -0.26),
-		Vector2(-5.6, 0.13), Vector2(-5.6, -0.52), Vector2(-5.5, -1.17), Vector2(-5.6, -1.95), Vector2(-5.8, -2.54),
-		Vector2(-5.2, -2.54),
+		Vector2(16.34, 25.35), Vector2(16.56, 25.25), Vector2(16.46, 25.44), Vector2(16.28, 25.58), Vector2(16.01, 25.54),
+		Vector2(15.82, 25.35), Vector2(15.86, 25.17),
 	],
-	# corsica
 	[
-		Vector2(-4.6, -5.2), Vector2(-4.45, -4.68), Vector2(-4.45, -4.03), Vector2(-4.75, -3.12), Vector2(-5.2, -3.38),
-		Vector2(-5.4, -3.77), Vector2(-5.4, -4.29), Vector2(-5.3, -4.68), Vector2(-4.7, -4.81),
+		Vector2(15.55, 25.46), Vector2(15.18, 25.39), Vector2(14.92, 25.24), Vector2(15.06, 25.13),
 	],
-	# mallorca
 	[
-		Vector2(-11.65, -0.78), Vector2(-10.8, -1.24), Vector2(-10.55, -0.91), Vector2(-10.8, -0.46), Vector2(-11.25, -0.52),
-		Vector2(-11.35, -0.71),
+		Vector2(20.57, 24.51), Vector2(20.78, 24.45), Vector2(20.89, 24.75), Vector2(20.74, 24.71), Vector2(20.01, 24.74),
+		Vector2(19.81, 24.63), Vector2(19.71, 24.42), Vector2(19.83, 24.33),
 	],
-	# menorca
 	[
-		Vector2(-10.2, -1.36), Vector2(-9.7, -1.17), Vector2(-9.9, -1.07), Vector2(-10.15, -1.2),
+		Vector2(26.22, 23.94), Vector2(26.21, 24.37), Vector2(26.15, 24.56), Vector2(25.71, 24.74), Vector2(25.46, 24.73),
+		Vector2(25.54, 24.53), Vector2(25.12, 24.67), Vector2(24.97, 24.51), Vector2(24.96, 24.30), Vector2(25.17, 24.10),
+		Vector2(25.30, 24.04), Vector2(25.52, 24.06), Vector2(25.59, 23.62), Vector2(25.59, 23.22), Vector2(25.69, 22.99),
+		Vector2(25.87, 22.92),
 	],
-	# ibiza
 	[
-		Vector2(-12.8, 0.03), Vector2(-12.4, -0.13), Vector2(-12.45, 0.19), Vector2(-12.7, 0.19),
+		Vector2(27.90, 28.10), Vector2(33.66, 28.10), Vector2(33.64, 27.25), Vector2(33.81, 27.02), Vector2(34.56, 26.79),
+		Vector2(34.56, 28.41), Vector2(-34.56, 28.41), Vector2(-34.56, 26.79), Vector2(-34.07, 26.70), Vector2(-33.12, 26.15),
+		Vector2(-32.77, 25.80), Vector2(-32.72, 25.59), Vector2(-32.92, 25.46), Vector2(-32.85, 25.24), Vector2(-32.73, 25.07),
+		Vector2(-32.12, 24.68), Vector2(-31.88, 24.24), Vector2(-31.74, 24.10), Vector2(-31.51, 24.13), Vector2(-31.41, 24.30),
+		Vector2(-31.18, 24.32), Vector2(-31.18, 24.13), Vector2(-31.08, 23.93), Vector2(-30.87, 23.98), Vector2(-30.82, 24.17),
+		Vector2(-30.59, 24.20), Vector2(-30.10, 24.05), Vector2(-29.89, 24.08), Vector2(-29.80, 24.29), Vector2(-29.40, 24.03),
+		Vector2(-28.39, 23.59), Vector2(-28.27, 23.41), Vector2(-28.13, 23.54), Vector2(-27.93, 23.47), Vector2(-27.68, 23.88),
+		Vector2(-27.46, 23.78), Vector2(-27.38, 23.59), Vector2(-27.18, 23.45), Vector2(-26.93, 23.48), Vector2(-26.86, 23.67),
+		Vector2(-26.70, 23.48), Vector2(-26.06, 23.41), Vector2(-25.64, 23.50), Vector2(-25.43, 23.81), Vector2(-25.22, 23.72),
+		Vector2(-24.56, 23.70), Vector2(-24.16, 23.57), Vector2(-23.81, 23.35), Vector2(-23.62, 23.30), Vector2(-23.47, 23.16),
+		Vector2(-23.26, 22.74), Vector2(-23.06, 22.81), Vector2(-22.98, 22.98), Vector2(-22.82, 23.10), Vector2(-22.62, 23.06),
+		Vector2(-22.34, 23.36), Vector2(-22.14, 23.24), Vector2(-22.08, 23.03), Vector2(-20.83, 22.31), Vector2(-20.65, 22.36),
+		Vector2(-20.35, 22.07), Vector2(-20.17, 22.08), Vector2(-20.02, 21.97), Vector2(-19.98, 21.81), Vector2(-19.47, 21.52),
+		Vector2(-18.94, 21.55), Vector2(-18.79, 21.68), Vector2(-18.77, 21.88), Vector2(-18.48, 22.16), Vector2(-18.25, 22.22),
+		Vector2(-17.97, 22.47), Vector2(-17.78, 22.50), Vector2(-17.46, 22.22), Vector2(-16.72, 22.47), Vector2(-16.53, 22.47),
+		Vector2(-16.38, 22.96), Vector2(-16.41, 23.31), Vector2(-16.74, 23.62), Vector2(-16.71, 23.81), Vector2(-16.50, 23.80),
+		Vector2(-16.53, 24.00), Vector2(-16.71, 24.40), Vector2(-16.57, 24.56), Vector2(-16.35, 24.61), Vector2(-16.12, 24.52),
+		Vector2(-15.73, 23.82), Vector2(-15.58, 23.40), Vector2(-14.85, 23.20), Vector2(-14.70, 22.83), Vector2(-14.57, 22.65),
+		Vector2(-14.22, 22.44), Vector2(-14.01, 22.20), Vector2(-13.87, 22.12), Vector2(-13.68, 22.17), Vector2(-13.31, 22.07),
+		Vector2(-13.10, 22.10), Vector2(-12.96, 21.97), Vector2(-12.87, 21.66), Vector2(-12.70, 22.01), Vector2(-12.36, 22.13),
+		Vector2(-12.17, 22.08), Vector2(-11.80, 22.12), Vector2(-11.68, 22.08), Vector2(-11.52, 22.11), Vector2(-11.37, 22.21),
+		Vector2(-10.81, 22.08), Vector2(-10.61, 22.14), Vector2(-10.02, 21.37), Vector2(-9.75, 21.55), Vector2(-9.37, 22.00),
+		Vector2(-9.01, 22.01), Vector2(-8.59, 21.89), Vector2(-8.31, 21.62), Vector2(-8.09, 21.61), Vector2(-7.95, 21.51),
+		Vector2(-7.80, 21.60), Vector2(-7.56, 21.89), Vector2(-7.35, 21.87), Vector2(-6.99, 22.11), Vector2(-6.75, 22.15),
+		Vector2(-6.55, 22.11), Vector2(-6.27, 21.82), Vector2(-6.10, 21.79), Vector2(-5.73, 21.90), Vector2(-5.38, 21.82),
+		Vector2(-5.03, 21.91), Vector2(-4.65, 21.76), Vector2(-3.89, 21.66), Vector2(-3.83, 21.25), Vector2(-3.71, 21.37),
+		Vector2(-3.53, 21.92), Vector2(-3.37, 22.01), Vector2(-2.04, 21.95), Vector2(-1.83, 21.99), Vector2(-1.69, 22.13),
+		Vector2(-1.73, 22.31), Vector2(-1.60, 22.45), Vector2(-0.48, 22.92), Vector2(-0.26, 22.93), Vector2(-0.14, 22.76),
+		Vector2(0.35, 23.16), Vector2(0.80, 23.27), Vector2(0.90, 23.46), Vector2(1.11, 23.58), Vector2(1.26, 23.75),
+		Vector2(1.48, 23.83), Vector2(2.36, 23.88), Vector2(2.98, 24.17), Vector2(3.11, 24.32), Vector2(3.09, 24.52),
+		Vector2(2.74, 25.35), Vector2(2.77, 28.10), Vector2(4.80, 28.10), Vector2(27.72, 20.85),
 	],
-	# crete
 	[
-		Vector2(9.55, 4.42), Vector2(10.0, 4.55), Vector2(11.15, 4.74), Vector2(12.3, 4.81), Vector2(12.15, 5.2),
-		Vector2(11.0, 5.26), Vector2(10.0, 4.94), Vector2(9.55, 4.88),
+		Vector2(26.18, 16.07), Vector2(26.35, 16.53), Vector2(26.60, 16.76), Vector2(26.87, 16.85), Vector2(26.78, 17.04),
+		Vector2(26.60, 17.06), Vector2(26.50, 16.94), Vector2(26.44, 17.08), Vector2(26.28, 17.20), Vector2(26.07, 17.16),
+		Vector2(25.93, 17.04), Vector2(25.73, 16.99), Vector2(25.29, 16.57), Vector2(25.02, 16.15), Vector2(25.18, 16.23),
+		Vector2(25.45, 16.48), Vector2(25.71, 16.61), Vector2(25.81, 16.44), Vector2(25.87, 16.18), Vector2(26.05, 16.03),
 	],
-	# cyprus
 	[
-		Vector2(18.3, 5.14), Vector2(18.9, 4.68), Vector2(19.3, 4.74), Vector2(20.6, 4.29), Vector2(20.0, 5.07),
-		Vector2(19.9, 5.26), Vector2(19.0, 5.72), Vector2(18.4, 5.53),
+		Vector2(28.27, 15.67), Vector2(28.21, 15.80), Vector2(27.96, 15.91), Vector2(27.87, 15.78), Vector2(27.71, 15.95),
+		Vector2(27.61, 15.78), Vector2(27.84, 15.56), Vector2(28.00, 15.65), Vector2(28.12, 15.51),
 	],
-	# rhodes
 	[
-		Vector2(14.22, 3.31), Vector2(14.25, 3.77), Vector2(13.75, 4.03), Vector2(13.7, 3.64),
+		Vector2(-16.40, 14.73), Vector2(-16.22, 14.77), Vector2(-16.27, 15.00), Vector2(-16.56, 15.03), Vector2(-16.52, 14.61),
 	],
-	# lesbos
 	[
-		Vector2(11.85, -0.46), Vector2(12.4, -0.49), Vector2(12.6, -0.06), Vector2(12.1, -0.13),
+		Vector2(-1.66, 12.06), Vector2(-1.40, 11.95), Vector2(-1.29, 11.97), Vector2(-1.27, 12.36), Vector2(-1.34, 12.48),
+		Vector2(-1.36, 12.75), Vector2(-1.43, 12.65), Vector2(-1.56, 12.89), Vector2(-1.72, 12.86), Vector2(-1.84, 12.57),
+		Vector2(-1.86, 12.35), Vector2(-1.97, 12.06), Vector2(-1.97, 11.91),
 	],
-	# chios
 	[
-		Vector2(12.0, 0.55), Vector2(12.15, 0.59), Vector2(12.15, 0.98), Vector2(11.95, 0.91),
+		Vector2(3.50, 12.12), Vector2(3.64, 11.99), Vector2(3.70, 12.27), Vector2(3.40, 12.80), Vector2(3.47, 12.96),
+		Vector2(3.32, 12.97), Vector2(3.16, 13.09), Vector2(3.00, 13.66), Vector2(2.75, 13.92), Vector2(2.57, 13.91),
+		Vector2(2.45, 13.80), Vector2(2.24, 13.77), Vector2(2.21, 13.64), Vector2(2.31, 13.39), Vector2(2.55, 13.05),
+		Vector2(2.98, 12.69), Vector2(3.25, 12.18), Vector2(3.28, 12.00), Vector2(3.42, 11.84),
 	],
-	# samos
 	[
-		Vector2(12.6, 1.56), Vector2(13.05, 1.62), Vector2(12.95, 1.76), Vector2(12.6, 1.69),
+		Vector2(3.56, 10.09), Vector2(3.71, 10.17), Vector2(3.77, 10.45), Vector2(3.91, 10.74), Vector2(3.91, 10.57),
+		Vector2(4.00, 10.65), Vector2(4.02, 10.89), Vector2(4.18, 11.00), Vector2(4.31, 11.02), Vector2(4.42, 10.90),
+		Vector2(4.52, 10.94), Vector2(4.41, 11.41), Vector2(4.26, 11.41), Vector2(4.21, 11.50), Vector2(4.20, 11.70),
+		Vector2(4.03, 12.11), Vector2(3.89, 12.24), Vector2(3.85, 12.15), Vector2(3.77, 12.10), Vector2(3.88, 11.83),
+		Vector2(3.82, 11.65), Vector2(3.61, 11.52), Vector2(3.62, 11.41), Vector2(3.76, 11.29), Vector2(3.78, 10.84),
+		Vector2(3.71, 10.57), Vector2(3.39, 9.94), Vector2(3.46, 9.92),
 	],
-	# naxos
 	[
-		Vector2(11.35, 2.41), Vector2(11.6, 2.41), Vector2(11.55, 2.66), Vector2(11.35, 2.63),
+		Vector2(1.82, 5.64), Vector2(2.33, 6.23), Vector2(2.25, 6.30), Vector2(1.89, 5.93), Vector2(1.73, 5.63),
 	],
-	# andros
 	[
-		Vector2(10.7, 1.33), Vector2(10.95, 1.46), Vector2(10.85, 1.59), Vector2(10.65, 1.49),
+		Vector2(4.55, 4.92), Vector2(4.52, 5.07), Vector2(4.40, 5.11), Vector2(4.30, 5.08), Vector2(4.28, 4.95),
+		Vector2(4.35, 4.85), Vector2(4.44, 4.89), Vector2(4.49, 4.84),
 	],
-	# kefalonia
 	[
-		Vector2(6.4, 0.78), Vector2(6.7, 0.91), Vector2(6.5, 1.17), Vector2(6.35, 1.04),
+		Vector2(-20.15, 3.77), Vector2(-20.07, 4.24), Vector2(-20.12, 4.46), Vector2(-20.20, 4.31), Vector2(-20.20, 4.71),
+		Vector2(-20.26, 4.78), Vector2(-20.72, 7.04), Vector2(-21.04, 7.23), Vector2(-21.30, 7.05), Vector2(-21.46, 6.20),
+		Vector2(-21.42, 5.99), Vector2(-21.33, 5.94), Vector2(-21.22, 5.44), Vector2(-21.32, 4.86), Vector2(-21.23, 4.52),
+		Vector2(-20.87, 4.40), Vector2(-20.60, 4.06), Vector2(-20.54, 3.92), Vector2(-20.57, 3.80), Vector2(-20.49, 3.83),
+		Vector2(-20.38, 3.64), Vector2(-20.38, 3.47), Vector2(-20.31, 3.34),
 	],
-	# corfu
 	[
-		Vector2(5.65, -1.04), Vector2(5.95, -0.98), Vector2(5.95, -0.59), Vector2(5.8, -0.71),
+		Vector2(-2.33, 3.27), Vector2(-2.28, 3.31), Vector2(-2.13, 4.05), Vector2(-2.00, 3.94), Vector2(-1.85, 4.17),
+		Vector2(-1.80, 4.68), Vector2(-1.75, 4.72), Vector2(-1.70, 4.96), Vector2(-1.72, 5.11), Vector2(-1.65, 5.30),
+		Vector2(-1.18, 5.72), Vector2(-1.21, 5.79), Vector2(-1.10, 5.97), Vector2(-1.02, 6.28), Vector2(-0.95, 6.22),
+		Vector2(-0.87, 6.34), Vector2(-0.82, 6.30), Vector2(-0.79, 6.61), Vector2(-0.41, 7.14), Vector2(-0.37, 7.73),
+		Vector2(-0.27, 7.98), Vector2(-0.40, 9.05), Vector2(-0.49, 9.33), Vector2(-0.63, 9.48), Vector2(-0.95, 10.53),
+		Vector2(-0.96, 10.85), Vector2(-1.07, 10.96), Vector2(-1.29, 10.98), Vector2(-1.67, 11.37), Vector2(-1.94, 11.17),
+		Vector2(-1.93, 11.01), Vector2(-2.02, 11.06), Vector2(-2.19, 11.30), Vector2(-2.76, 11.04), Vector2(-2.88, 10.85),
+		Vector2(-2.96, 10.44), Vector2(-3.06, 10.32), Vector2(-3.24, 10.28), Vector2(-3.18, 10.13), Vector2(-3.24, 9.92),
+		Vector2(-3.32, 10.11), Vector2(-3.49, 10.17), Vector2(-3.29, 9.66), Vector2(-3.32, 9.46), Vector2(-3.46, 9.70),
+		Vector2(-3.58, 9.80), Vector2(-3.65, 10.05), Vector2(-3.80, 9.92), Vector2(-3.79, 9.76), Vector2(-4.02, 9.42),
+		Vector2(-3.98, 9.35), Vector2(-4.23, 9.16), Vector2(-4.36, 9.15), Vector2(-4.55, 9.00), Vector2(-4.89, 9.03),
+		Vector2(-5.36, 9.24), Vector2(-5.54, 9.22), Vector2(-5.91, 9.45), Vector2(-6.02, 9.74), Vector2(-6.30, 9.78),
+		Vector2(-6.47, 9.72), Vector2(-6.74, 9.77), Vector2(-6.85, 9.93), Vector2(-6.91, 9.92), Vector2(-7.10, 10.11),
+		Vector2(-7.37, 10.09), Vector2(-7.67, 9.84), Vector2(-7.67, 9.66), Vector2(-7.58, 9.62), Vector2(-7.53, 9.22),
+		Vector2(-7.68, 8.56), Vector2(-7.67, 8.39), Vector2(-7.75, 8.10), Vector2(-7.84, 7.98), Vector2(-7.86, 7.75),
+		Vector2(-8.00, 7.39), Vector2(-7.93, 7.46), Vector2(-7.98, 7.24), Vector2(-7.83, 7.40), Vector2(-7.99, 6.88),
+		Vector2(-7.90, 6.49), Vector2(-7.92, 6.32), Vector2(-7.84, 6.11), Vector2(-7.81, 6.29), Vector2(-7.75, 6.13),
+		Vector2(-7.35, 5.81), Vector2(-7.26, 5.78), Vector2(-7.21, 5.82), Vector2(-6.94, 5.68), Vector2(-6.86, 5.59),
+		Vector2(-6.76, 5.60), Vector2(-6.56, 5.51), Vector2(-6.29, 5.09), Vector2(-6.28, 4.82), Vector2(-6.14, 4.58),
+		Vector2(-6.06, 4.82), Vector2(-5.98, 4.76), Vector2(-6.05, 4.63), Vector2(-5.99, 4.49), Vector2(-5.90, 4.55),
+		Vector2(-5.88, 4.34), Vector2(-5.73, 4.09), Vector2(-5.63, 4.04), Vector2(-5.63, 3.96), Vector2(-5.54, 3.99),
+		Vector2(-5.54, 3.92), Vector2(-5.36, 3.84), Vector2(-5.11, 4.14), Vector2(-4.87, 4.17), Vector2(-4.91, 4.01),
+		Vector2(-4.82, 3.79), Vector2(-4.73, 3.71), Vector2(-4.76, 3.64), Vector2(-4.68, 3.48), Vector2(-4.57, 3.38),
+		Vector2(-4.47, 3.42), Vector2(-4.31, 3.37), Vector2(-4.31, 3.22), Vector2(-4.45, 3.13), Vector2(-4.35, 3.09),
+		Vector2(-3.96, 3.35), Vector2(-3.90, 3.32), Vector2(-3.78, 3.40), Vector2(-3.67, 3.32), Vector2(-3.60, 3.35),
+		Vector2(-3.55, 3.29), Vector2(-3.47, 3.43), Vector2(-3.59, 3.70), Vector2(-3.66, 3.71), Vector2(-3.63, 3.82),
+		Vector2(-3.76, 4.10), Vector2(-3.74, 4.18), Vector2(-3.21, 4.69), Vector2(-3.05, 4.76), Vector2(-3.02, 4.85),
+		Vector2(-2.84, 4.95), Vector2(-2.71, 4.85), Vector2(-2.55, 4.19), Vector2(-2.56, 3.60), Vector2(-2.53, 3.54),
+		Vector2(-2.56, 3.45), Vector2(-2.47, 3.07), Vector2(-2.40, 2.96),
 	],
-	# malta
 	[
-		Vector2(0.2, 3.8), Vector2(0.57, 4.06), Vector2(0.4, 4.12),
+		Vector2(-5.31, 2.33), Vector2(-5.74, 2.60), Vector2(-5.87, 2.81), Vector2(-6.03, 2.87), Vector2(-6.04, 2.75),
+		Vector2(-5.96, 2.58), Vector2(-5.77, 2.47), Vector2(-5.74, 2.40), Vector2(-5.38, 2.29),
+	],
+	[
+		Vector2(-7.05, 2.32), Vector2(-6.94, 2.29), Vector2(-6.89, 2.41), Vector2(-7.35, 2.50), Vector2(-7.28, 2.34),
+		Vector2(-7.17, 2.34), Vector2(-7.12, 2.24),
+	],
+	[
+		Vector2(-6.19, 2.40), Vector2(-6.48, 2.48), Vector2(-6.73, 2.44), Vector2(-6.74, 2.34), Vector2(-6.58, 2.28),
+		Vector2(-6.46, 2.37), Vector2(-6.16, 2.24),
+	],
+	[
+		Vector2(-9.17, 1.65), Vector2(-8.93, 1.78), Vector2(-8.90, 1.88), Vector2(-8.54, 1.90), Vector2(-8.49, 1.79),
+		Vector2(-8.14, 1.92), Vector2(-8.07, 2.10), Vector2(-7.78, 2.15), Vector2(-7.54, 2.32), Vector2(-7.76, 2.43),
+		Vector2(-7.97, 2.31), Vector2(-8.53, 2.25), Vector2(-8.89, 2.12), Vector2(-8.97, 2.15), Vector2(-9.32, 2.04),
+		Vector2(-9.35, 1.92), Vector2(-9.53, 1.90), Vector2(-9.40, 1.63),
+	],
+	[
+		Vector2(-0.51, 1.19), Vector2(-0.58, 1.52), Vector2(-0.68, 1.54), Vector2(-0.71, 1.62), Vector2(-0.91, 1.75),
+		Vector2(-1.02, 1.75), Vector2(-1.28, 1.59), Vector2(-1.27, 1.50), Vector2(-0.99, 1.52), Vector2(-0.93, 1.38),
+		Vector2(-0.91, 1.53), Vector2(-0.80, 1.51), Vector2(-0.64, 1.32), Vector2(-0.66, 1.15), Vector2(-0.55, 1.15),
+	],
+	[
+		Vector2(-4.71, 0.86), Vector2(-4.64, 1.07), Vector2(-4.80, 0.95), Vector2(-5.20, 0.94), Vector2(-5.16, 0.79),
+		Vector2(-4.92, 0.77),
+	],
+	[
+		Vector2(-0.38, 1.10), Vector2(-0.36, 1.24), Vector2(-0.42, 1.32), Vector2(-0.50, 1.05), Vector2(-0.83, 0.76),
+		Vector2(-0.78, 0.69),
+	],
+	[
+		Vector2(-4.03, 0.22), Vector2(-3.95, 0.77), Vector2(-3.75, 0.93), Vector2(-3.59, 0.64), Vector2(-3.37, 0.47),
+		Vector2(-3.20, 0.47), Vector2(-2.89, 0.67), Vector2(-2.69, 0.72), Vector2(-2.00, 1.07), Vector2(-1.76, 1.35),
+		Vector2(-1.73, 1.51), Vector2(-1.41, 1.68), Vector2(-1.36, 1.83), Vector2(-1.54, 1.86), Vector2(-1.50, 2.05),
+		Vector2(-1.33, 2.23), Vector2(-1.20, 2.52), Vector2(-1.09, 2.51), Vector2(-1.10, 2.64), Vector2(-0.95, 2.69),
+		Vector2(-1.01, 2.74), Vector2(-0.81, 2.86), Vector2(-0.83, 2.94), Vector2(-0.95, 2.96), Vector2(-1.00, 2.88),
+		Vector2(-1.36, 2.81), Vector2(-1.62, 2.48), Vector2(-1.72, 2.24), Vector2(-1.97, 2.11), Vector2(-2.25, 2.28),
+		Vector2(-2.22, 2.49), Vector2(-2.38, 2.59), Vector2(-2.68, 2.53), Vector2(-2.85, 2.30), Vector2(-3.05, 2.24),
+		Vector2(-3.09, 2.32), Vector2(-3.34, 2.33), Vector2(-3.26, 2.10), Vector2(-3.14, 2.03), Vector2(-3.28, 1.49),
+		Vector2(-3.65, 1.26), Vector2(-3.81, 1.23), Vector2(-4.10, 0.98), Vector2(-4.15, 1.11), Vector2(-4.23, 1.14),
+		Vector2(-4.27, 0.92), Vector2(-4.42, 0.78), Vector2(-4.21, 0.68), Vector2(-4.07, 0.69), Vector2(-4.09, 0.61),
+		Vector2(-4.37, 0.61), Vector2(-4.45, 0.45), Vector2(-4.62, 0.40), Vector2(-4.70, 0.26), Vector2(-4.44, 0.19),
+		Vector2(-4.34, 0.10),
+	],
+	[
+		Vector2(-5.71, -0.39), Vector2(-5.87, -0.12), Vector2(-6.01, -0.07), Vector2(-6.20, -0.12), Vector2(-6.68, -0.07),
+		Vector2(-6.71, 0.14), Vector2(-6.54, 0.39), Vector2(-6.44, 0.26), Vector2(-6.08, 0.17), Vector2(-6.09, 0.30),
+		Vector2(-6.18, 0.26), Vector2(-6.26, 0.42), Vector2(-6.43, 0.53), Vector2(-6.25, 0.88), Vector2(-6.28, 0.98),
+		Vector2(-6.11, 1.30), Vector2(-6.11, 1.48), Vector2(-6.22, 1.56), Vector2(-6.29, 1.46), Vector2(-6.22, 1.25),
+		Vector2(-6.39, 1.34), Vector2(-6.43, 1.27), Vector2(-6.41, 1.16), Vector2(-6.55, 1.00), Vector2(-6.55, 0.74),
+		Vector2(-6.66, 0.81), Vector2(-6.64, 1.53), Vector2(-6.76, 1.57), Vector2(-6.84, 1.49), Vector2(-6.79, 1.23),
+		Vector2(-6.82, 0.97), Vector2(-6.90, 0.96), Vector2(-6.96, 0.77), Vector2(-6.88, 0.59), Vector2(-6.71, -0.16),
+		Vector2(-6.55, -0.36), Vector2(-6.40, -0.28), Vector2(-5.94, -0.25), Vector2(-5.75, -0.45),
+	],
+	[
+		Vector2(-5.18, -0.45), Vector2(-5.07, -0.43), Vector2(-5.06, -0.07), Vector2(-5.16, -0.10), Vector2(-5.19, 0.07),
+		Vector2(-5.11, 0.22), Vector2(-5.16, 0.25), Vector2(-5.24, 0.07), Vector2(-5.30, -0.28), Vector2(-5.26, -0.50),
+		Vector2(-5.20, -0.60),
+	],
+	[
+		Vector2(-11.04, -1.45), Vector2(-10.44, -0.58), Vector2(-10.24, -0.58), Vector2(-10.08, -0.39), Vector2(-9.97, -0.16),
+		Vector2(-9.82, -0.03), Vector2(-9.90, 0.20), Vector2(-9.72, 0.30), Vector2(-9.62, 0.65), Vector2(-9.48, 0.67),
+		Vector2(-9.39, 0.85), Vector2(-9.44, 1.62), Vector2(-9.66, 1.63), Vector2(-9.82, 1.39), Vector2(-10.06, 1.17),
+		Vector2(-10.39, 0.57), Vector2(-10.53, 0.18), Vector2(-10.70, -0.05), Vector2(-10.83, -0.50), Vector2(-11.00, -0.68),
+		Vector2(-11.10, -0.92), Vector2(-11.45, -1.38), Vector2(-11.46, -1.52),
+	],
+	[
+		Vector2(-7.17, -1.78), Vector2(-7.16, -1.66), Vector2(-6.88, -1.50), Vector2(-6.89, -1.39), Vector2(-7.02, -1.37),
+		Vector2(-6.99, -1.24), Vector2(-7.13, -1.14), Vector2(-7.24, -0.89), Vector2(-7.09, -0.63), Vector2(-7.13, -0.51),
+		Vector2(-6.91, -0.25), Vector2(-7.14, -0.22), Vector2(-7.20, -0.03), Vector2(-7.20, 0.22), Vector2(-7.38, 0.41),
+		Vector2(-7.46, 1.11), Vector2(-7.49, 1.01), Vector2(-7.71, 1.14), Vector2(-7.78, 0.97), Vector2(-7.92, 0.95),
+		Vector2(-8.01, 0.86), Vector2(-8.24, 0.96), Vector2(-8.31, 0.83), Vector2(-8.60, 0.81), Vector2(-8.63, 0.44),
+		Vector2(-8.72, 0.36), Vector2(-8.81, 0.13), Vector2(-8.82, -0.37), Vector2(-8.70, -0.55), Vector2(-8.56, -0.46),
+		Vector2(-8.42, -0.51), Vector2(-8.38, -0.75), Vector2(-8.06, -0.86), Vector2(-7.76, -1.36), Vector2(-7.45, -1.70),
+		Vector2(-7.35, -1.92), Vector2(-7.27, -1.92),
+	],
+	[
+		Vector2(-5.53, -2.57), Vector2(-5.46, -1.99), Vector2(-5.53, -1.74), Vector2(-5.61, -2.00), Vector2(-5.69, -1.88),
+		Vector2(-5.63, -1.67), Vector2(-5.68, -1.54), Vector2(-5.91, -1.71), Vector2(-5.96, -1.91), Vector2(-5.91, -2.04),
+		Vector2(-6.03, -2.17), Vector2(-6.09, -2.05), Vector2(-6.18, -2.07), Vector2(-6.32, -1.91), Vector2(-6.35, -1.99),
+		Vector2(-6.28, -2.23), Vector2(-6.05, -2.41), Vector2(-5.98, -2.28), Vector2(-5.84, -2.36), Vector2(-5.81, -2.48),
+		Vector2(-5.67, -2.49), Vector2(-5.68, -2.71),
+	],
+	[
+		Vector2(-14.15, -2.37), Vector2(-14.06, -2.08), Vector2(-14.09, -1.79), Vector2(-14.33, -1.65), Vector2(-14.42, -1.87),
+		Vector2(-14.46, -2.27), Vector2(-14.37, -2.72),
+	],
+	[
+		Vector2(-5.96, -2.85), Vector2(-6.14, -2.50), Vector2(-6.26, -2.69), Vector2(-6.18, -2.85), Vector2(-6.15, -3.02),
+		Vector2(-6.05, -3.04), Vector2(-6.05, -2.90), Vector2(-5.94, -3.12),
+	],
+	[
+		Vector2(-6.78, -2.93), Vector2(-7.01, -2.58), Vector2(-7.26, -2.32), Vector2(-6.91, -2.88), Vector2(-6.81, -3.16),
+	],
+	[
+		Vector2(-6.24, -3.22), Vector2(-6.12, -3.22), Vector2(-6.12, -3.10), Vector2(-6.34, -2.90), Vector2(-6.36, -3.30),
+	],
+	[
+		Vector2(-5.72, -3.48), Vector2(-5.61, -3.07), Vector2(-5.76, -3.14), Vector2(-5.71, -2.87), Vector2(-5.80, -2.81),
+		Vector2(-5.81, -3.01), Vector2(-5.86, -3.02), Vector2(-5.89, -3.19), Vector2(-5.78, -3.17), Vector2(-5.78, -3.28),
+		Vector2(-5.90, -3.49),
+	],
+	[
+		Vector2(-6.47, -5.17), Vector2(-6.35, -5.09), Vector2(-6.29, -5.17), Vector2(-6.30, -4.98), Vector2(-6.24, -4.77),
+		Vector2(-6.29, -4.54), Vector2(-6.40, -4.44), Vector2(-6.43, -4.21), Vector2(-6.39, -3.99), Vector2(-6.29, -3.96),
+		Vector2(-6.20, -3.99), Vector2(-5.96, -3.83), Vector2(-5.98, -3.68), Vector2(-5.92, -3.61), Vector2(-5.94, -3.48),
+		Vector2(-6.17, -3.75), Vector2(-6.21, -3.67), Vector2(-6.33, -3.83), Vector2(-6.50, -3.79), Vector2(-6.60, -3.86),
+		Vector2(-6.59, -3.97), Vector2(-6.53, -4.04), Vector2(-6.59, -4.09), Vector2(-6.61, -4.01), Vector2(-6.74, -4.29),
+		Vector2(-6.74, -4.56), Vector2(-6.66, -4.49), Vector2(-6.65, -4.92), Vector2(-6.58, -5.17),
+	],
+	[
+		Vector2(24.70, -5.08), Vector2(24.73, -5.00), Vector2(24.59, -4.99), Vector2(24.54, -4.94), Vector2(24.32, -5.09),
+		Vector2(24.34, -5.16), Vector2(24.42, -5.18),
+	],
+	[
+		Vector2(25.59, -5.52), Vector2(25.62, -5.57), Vector2(25.77, -5.57), Vector2(25.93, -5.50), Vector2(25.96, -5.40),
+		Vector2(26.07, -5.41), Vector2(26.06, -5.32), Vector2(26.15, -5.31), Vector2(26.24, -5.20), Vector2(26.17, -5.09),
+		Vector2(26.08, -5.15), Vector2(25.93, -5.15), Vector2(25.82, -5.08), Vector2(25.79, -5.15), Vector2(25.73, -5.11),
+		Vector2(25.65, -4.92), Vector2(25.59, -5.04), Vector2(25.26, -5.09), Vector2(25.17, -5.04), Vector2(25.06, -5.13),
+		Vector2(25.08, -5.22), Vector2(25.40, -5.16), Vector2(25.47, -5.22), Vector2(25.38, -5.34), Vector2(25.39, -5.45),
+		Vector2(25.26, -5.50), Vector2(25.31, -5.58),
+	],
+	[
+		Vector2(-8.49, -5.63), Vector2(-8.45, -5.52), Vector2(-8.57, -5.22), Vector2(-8.74, -5.09), Vector2(-8.90, -5.17),
+		Vector2(-8.90, -5.42), Vector2(-8.81, -5.55), Vector2(-8.60, -5.63),
+	],
+	[
+		Vector2(23.88, -6.50), Vector2(24.06, -6.40), Vector2(24.14, -6.30), Vector2(24.32, -6.33), Vector2(24.67, -5.95),
+		Vector2(24.85, -5.90), Vector2(24.83, -5.81), Vector2(24.97, -5.80), Vector2(25.12, -5.68), Vector2(25.10, -5.62),
+		Vector2(24.43, -5.56), Vector2(24.56, -5.72), Vector2(24.48, -5.80), Vector2(24.36, -5.82), Vector2(24.25, -6.06),
+		Vector2(24.14, -6.05), Vector2(23.90, -6.19), Vector2(23.65, -6.24), Vector2(23.58, -6.29), Vector2(23.64, -6.37),
+		Vector2(23.47, -6.38), Vector2(23.33, -6.23), Vector2(23.25, -6.23), Vector2(23.22, -6.15), Vector2(23.04, -6.15),
+		Vector2(23.37, -6.47), Vector2(23.56, -6.53),
+	],
+	[
+		Vector2(-6.35, -7.06), Vector2(-6.58, -6.17), Vector2(-6.68, -6.42), Vector2(-6.70, -6.63), Vector2(-6.59, -6.92),
+		Vector2(-6.43, -7.14),
+	],
+	[
+		Vector2(-3.91, -9.82), Vector2(-3.88, -9.71), Vector2(-3.99, -9.53), Vector2(-4.07, -9.63), Vector2(-4.17, -9.55),
+		Vector2(-4.22, -9.37), Vector2(-4.35, -9.46), Vector2(-4.34, -9.61), Vector2(-4.24, -9.79), Vector2(-4.13, -9.76),
+		Vector2(-4.05, -9.89),
+	],
+	[
+		Vector2(-23.25, -10.16), Vector2(-23.23, -10.08), Vector2(-23.43, -9.95), Vector2(-23.52, -9.99), Vector2(-23.57, -10.12),
+		Vector2(-23.46, -10.13), Vector2(-23.43, -10.21), Vector2(-23.30, -10.20), Vector2(-23.12, -10.30),
+	],
+	[
+		Vector2(-25.10, -10.20), Vector2(-24.81, -10.20), Vector2(-24.82, -10.14), Vector2(-24.71, -10.18), Vector2(-24.74, -10.09),
+		Vector2(-25.01, -10.06), Vector2(-25.01, -10.11), Vector2(-25.25, -10.17), Vector2(-25.21, -10.31),
+	],
+	[
+		Vector2(-26.85, -10.86), Vector2(-26.82, -10.76), Vector2(-26.86, -10.60), Vector2(-27.37, -10.91), Vector2(-27.35, -11.08),
+		Vector2(-27.12, -11.05), Vector2(-26.78, -11.11),
+	],
+	[
+		Vector2(-27.88, -11.85), Vector2(-27.90, -11.42), Vector2(-27.99, -11.44), Vector2(-28.07, -11.33), Vector2(-28.14, -11.41),
+		Vector2(-28.19, -11.99), Vector2(-28.09, -11.98), Vector2(-27.99, -12.08),
+	],
+	[
+		Vector2(-2.51, -11.68), Vector2(-2.52, -11.42), Vector2(-2.70, -11.09), Vector2(-2.69, -10.76), Vector2(-2.76, -10.51),
+		Vector2(-2.73, -10.35), Vector2(-2.83, -10.13), Vector2(-3.08, -9.98), Vector2(-3.41, -9.96), Vector2(-3.69, -9.61),
+		Vector2(-3.82, -9.73), Vector2(-3.82, -9.96), Vector2(-4.16, -9.89), Vector2(-4.39, -9.75), Vector2(-4.60, -9.73),
+		Vector2(-4.42, -9.51), Vector2(-4.54, -8.99), Vector2(-4.67, -8.86), Vector2(-4.76, -8.98), Vector2(-4.71, -9.26),
+		Vector2(-4.84, -9.34), Vector2(-4.91, -9.56), Vector2(-4.73, -9.65), Vector2(-4.63, -9.85), Vector2(-4.44, -10.01),
+		Vector2(-4.30, -10.22), Vector2(-3.92, -10.32), Vector2(-3.71, -10.25), Vector2(-3.51, -10.81), Vector2(-3.38, -10.66),
+		Vector2(-2.99, -11.11), Vector2(-2.87, -11.50), Vector2(-2.90, -11.87), Vector2(-2.82, -12.08), Vector2(-2.62, -12.14),
+	],
+	[
+		Vector2(-27.92, -12.39), Vector2(-27.99, -12.14), Vector2(-28.08, -12.20), Vector2(-28.12, -12.43), Vector2(-28.08, -12.55),
+		Vector2(-27.96, -12.68),
+	],
+	[
+		Vector2(-2.28, -13.18), Vector2(-1.99, -13.00), Vector2(-1.86, -13.14), Vector2(-1.82, -12.76), Vector2(-2.10, -12.67),
+		Vector2(-2.27, -12.34), Vector2(-2.57, -12.57), Vector2(-2.68, -12.20), Vector2(-2.89, -12.20), Vector2(-2.92, -12.53),
+		Vector2(-2.82, -12.79), Vector2(-2.61, -12.81), Vector2(-2.50, -13.54),
+	],
+	[
+		Vector2(27.14, -13.89), Vector2(27.28, -13.84), Vector2(27.45, -13.85), Vector2(27.36, -13.71), Vector2(27.29, -13.68),
+		Vector2(27.04, -13.83), Vector2(27.00, -13.95), Vector2(27.07, -14.05),
+	],
+	[
+		Vector2(27.29, -15.00), Vector2(27.49, -14.85), Vector2(27.49, -14.79), Vector2(27.40, -14.78), Vector2(27.15, -14.89),
+		Vector2(26.97, -15.06), Vector2(27.04, -15.09),
+	],
+	[
+		Vector2(15.22, -15.21), Vector2(15.38, -14.92), Vector2(15.57, -14.77), Vector2(15.65, -14.57), Vector2(15.55, -14.52),
+		Vector2(15.23, -14.69), Vector2(15.18, -14.81), Vector2(15.00, -14.94), Vector2(14.97, -15.04), Vector2(14.77, -15.10),
+		Vector2(14.70, -15.30), Vector2(14.72, -15.39),
+	],
+	[
+		Vector2(28.72, -15.69), Vector2(28.49, -15.07), Vector2(28.58, -15.16), Vector2(28.71, -15.08), Vector2(28.64, -14.96),
+		Vector2(28.81, -14.86), Vector2(28.90, -14.95), Vector2(29.09, -14.84), Vector2(29.05, -14.58), Vector2(29.17, -14.64),
+		Vector2(29.25, -14.23), Vector2(29.17, -13.92), Vector2(29.08, -13.91), Vector2(28.96, -13.97), Vector2(29.00, -14.26),
+		Vector2(28.95, -14.31), Vector2(28.72, -14.00), Vector2(28.61, -14.01), Vector2(28.74, -14.18), Vector2(28.56, -14.26),
+		Vector2(27.98, -14.25), Vector2(27.95, -14.36), Vector2(28.07, -14.48), Vector2(27.99, -14.58), Vector2(28.15, -14.79),
+		Vector2(28.35, -15.37), Vector2(28.47, -15.57), Vector2(28.63, -15.70),
+	],
+	[
+		Vector2(13.88, -16.60), Vector2(14.06, -16.63), Vector2(14.01, -16.20), Vector2(14.17, -15.90), Vector2(14.10, -15.90),
+		Vector2(13.81, -16.36), Vector2(13.79, -16.65),
+	],
+	[
+		Vector2(-2.25, -16.11), Vector2(-2.26, -15.75), Vector2(-1.99, -14.74), Vector2(-2.27, -14.86), Vector2(-2.39, -14.34),
+		Vector2(-2.20, -13.99), Vector2(-2.21, -13.74), Vector2(-2.36, -13.94), Vector2(-2.48, -13.68), Vector2(-2.51, -14.70),
+		Vector2(-2.46, -15.45), Vector2(-2.57, -15.81), Vector2(-2.56, -16.32), Vector2(-2.38, -16.50), Vector2(-2.46, -16.67),
+		Vector2(-2.37, -16.73),
+	],
+	[
+		Vector2(-30.85, -16.80), Vector2(-30.95, -16.54), Vector2(-30.92, -16.27), Vector2(-31.06, -15.93), Vector2(-31.40, -15.72),
+		Vector2(-31.68, -15.77), Vector2(-31.52, -16.16), Vector2(-31.62, -16.54), Vector2(-31.21, -17.02), Vector2(-31.05, -17.03),
+	],
+	[
+		Vector2(-27.32, -17.20), Vector2(-27.44, -16.89), Vector2(-27.64, -17.11), Vector2(-27.67, -17.27), Vector2(-27.38, -17.40),
+	],
+	[
+		Vector2(10.07, -18.11), Vector2(10.15, -17.98), Vector2(9.79, -17.64), Vector2(9.69, -17.74), Vector2(9.66, -17.93),
+		Vector2(9.94, -18.13),
+	],
+	[
+		Vector2(-30.52, -17.97), Vector2(-30.14, -18.02), Vector2(-30.19, -17.70), Vector2(-30.36, -17.34), Vector2(-30.16, -17.32),
+		Vector2(-29.97, -16.82), Vector2(-29.84, -16.76), Vector2(-29.67, -16.18), Vector2(-29.44, -16.11), Vector2(-29.46, -15.87),
+		Vector2(-29.56, -15.77), Vector2(-29.48, -15.58), Vector2(-29.65, -15.38), Vector2(-29.91, -15.39), Vector2(-30.24, -15.29),
+		Vector2(-30.33, -15.36), Vector2(-30.45, -15.19), Vector2(-30.63, -15.23), Vector2(-30.77, -15.09), Vector2(-30.87, -15.16),
+		Vector2(-30.59, -15.55), Vector2(-30.44, -15.63), Vector2(-30.72, -15.69), Vector2(-30.77, -15.83), Vector2(-30.57, -15.95),
+		Vector2(-30.68, -16.15), Vector2(-30.64, -16.40), Vector2(-30.35, -16.36), Vector2(-30.33, -16.58), Vector2(-30.46, -16.82),
+		Vector2(-30.69, -16.89), Vector2(-30.74, -16.99), Vector2(-30.67, -17.16), Vector2(-30.73, -17.27), Vector2(-30.83, -17.09),
+		Vector2(-30.84, -17.46), Vector2(-30.94, -17.66), Vector2(-30.87, -18.07), Vector2(-30.72, -18.40), Vector2(-30.57, -18.37),
+		Vector2(-30.34, -18.40),
+	],
+	[
+		Vector2(7.55, -19.08), Vector2(7.57, -18.92), Vector2(7.45, -18.86), Vector2(7.21, -19.05), Vector2(7.40, -19.12),
+	],
+	[
+		Vector2(23.64, -20.19), Vector2(23.64, -20.10), Vector2(23.41, -19.87), Vector2(23.28, -19.88), Vector2(23.23, -19.99),
+		Vector2(23.38, -20.19),
+	],
+	[
+		Vector2(6.51, -20.49), Vector2(6.63, -20.53), Vector2(6.78, -20.42), Vector2(6.97, -20.36), Vector2(6.81, -20.22),
+		Vector2(6.59, -20.39), Vector2(6.42, -20.37), Vector2(6.38, -20.41), Vector2(6.39, -20.57),
+	],
+	[
+		Vector2(23.01, -21.41), Vector2(23.04, -21.21), Vector2(23.14, -21.28), Vector2(23.68, -20.87), Vector2(23.70, -20.66),
+		Vector2(23.84, -20.69), Vector2(23.98, -20.55), Vector2(23.81, -20.41), Vector2(23.51, -20.51), Vector2(23.40, -20.71),
+		Vector2(23.21, -20.48), Vector2(22.94, -20.25), Vector2(22.87, -20.51), Vector2(22.61, -20.46), Vector2(22.78, -20.68),
+		Vector2(22.87, -21.45),
+	],
+	[
+		Vector2(-32.55, -21.77), Vector2(-32.59, -21.48), Vector2(-32.37, -21.17), Vector2(-32.62, -20.83), Vector2(-33.34, -20.45),
+		Vector2(-34.13, -20.65), Vector2(-33.94, -20.84), Vector2(-34.36, -21.06), Vector2(-34.02, -21.15), Vector2(-34.03, -21.28),
+		Vector2(-34.43, -21.39), Vector2(-34.30, -21.69), Vector2(-34.01, -21.75), Vector2(-33.71, -21.44), Vector2(-33.42, -21.69),
+		Vector2(-33.18, -21.56), Vector2(-32.86, -21.81),
+	],
+	[
+		Vector2(24.94, -22.50), Vector2(24.92, -22.23), Vector2(24.79, -22.10), Vector2(24.58, -22.07), Vector2(24.53, -22.30),
+		Vector2(24.61, -22.57), Vector2(24.79, -22.63),
+	],
+	[
+		Vector2(20.82, -23.31), Vector2(21.00, -23.03), Vector2(20.88, -22.86), Vector2(20.62, -23.01), Vector2(20.46, -22.95),
+		Vector2(20.20, -23.17), Vector2(20.37, -23.32), Vector2(20.50, -23.54),
+	],
+	[
+		Vector2(4.80, -23.88), Vector2(4.59, -23.86), Vector2(4.56, -24.02), Vector2(4.80, -24.23),
+	],
+	[
+		Vector2(4.99, -24.25), Vector2(5.27, -24.10), Vector2(5.25, -24.03), Vector2(5.05, -23.91), Vector2(4.80, -23.88),
+		Vector2(4.82, -24.25),
+	],
+	[
+		Vector2(21.33, -24.35), Vector2(21.53, -24.13), Vector2(21.79, -23.56), Vector2(21.62, -23.32), Vector2(21.97, -23.22),
+		Vector2(21.99, -22.75), Vector2(22.23, -23.10), Vector2(22.46, -22.79), Vector2(22.40, -22.44), Vector2(22.59, -22.12),
+		Vector2(22.79, -22.46), Vector2(22.93, -22.87), Vector2(22.94, -23.41), Vector2(23.50, -23.30), Vector2(23.75, -23.05),
+		Vector2(23.77, -22.81), Vector2(23.62, -22.56), Vector2(23.76, -22.31), Vector2(23.73, -22.08), Vector2(23.36, -21.75),
+		Vector2(23.09, -21.68), Vector2(22.89, -21.82), Vector2(22.59, -21.01), Vector2(22.37, -20.71), Vector2(22.10, -20.68),
+		Vector2(21.94, -20.50), Vector2(21.93, -20.21), Vector2(21.71, -20.16), Vector2(21.47, -19.81), Vector2(21.27, -19.33),
+		Vector2(21.19, -19.00), Vector2(21.18, -18.53), Vector2(21.46, -18.46), Vector2(21.64, -17.78), Vector2(21.91, -17.86),
+		Vector2(22.26, -17.69), Vector2(22.46, -17.54), Vector2(22.59, -17.35), Vector2(22.83, -17.25), Vector2(23.04, -17.08),
+		Vector2(23.56, -17.02), Vector2(23.53, -16.69), Vector2(23.59, -16.31), Vector2(23.73, -15.90), Vector2(24.02, -15.55),
+		Vector2(24.16, -15.67), Vector2(24.27, -16.05), Vector2(24.17, -16.64), Vector2(24.03, -16.84), Vector2(24.34, -17.02),
+		Vector2(24.56, -17.29), Vector2(24.66, -17.56), Vector2(24.65, -17.83), Vector2(24.52, -18.17), Vector2(24.28, -18.47),
+		Vector2(24.51, -18.90), Vector2(24.36, -19.94), Vector2(24.50, -20.03), Vector2(25.02, -19.88), Vector2(25.18, -19.99),
+		Vector2(25.60, -19.60), Vector2(25.66, -19.43), Vector2(26.00, -19.40), Vector2(26.06, -18.53), Vector2(26.23, -18.47),
+		Vector2(26.37, -18.23), Vector2(26.65, -18.45), Vector2(26.83, -18.91), Vector2(26.96, -19.10), Vector2(27.57, -17.73),
+		Vector2(27.49, -17.49), Vector2(27.75, -17.27), Vector2(27.92, -17.05), Vector2(28.23, -16.95), Vector2(28.35, -16.82),
+		Vector2(28.43, -16.50), Vector2(28.58, -16.45), Vector2(28.65, -16.31), Vector2(28.67, -15.89), Vector2(28.39, -15.62),
+		Vector2(28.08, -15.49), Vector2(27.83, -15.19), Vector2(27.51, -15.14), Vector2(26.81, -15.21), Vector2(26.61, -15.19),
+		Vector2(26.45, -14.93), Vector2(26.21, -14.77), Vector2(25.73, -13.99), Vector2(25.87, -14.04), Vector2(26.18, -14.50),
+		Vector2(26.58, -14.80), Vector2(26.87, -14.83), Vector2(27.04, -14.66), Vector2(26.86, -14.42), Vector2(26.98, -13.78),
+		Vector2(27.23, -13.61), Vector2(27.55, -13.66), Vector2(27.74, -14.04), Vector2(27.75, -13.79), Vector2(27.88, -13.67),
+		Vector2(27.64, -13.44), Vector2(27.02, -13.10), Vector2(26.81, -12.86), Vector2(26.66, -12.88), Vector2(26.66, -13.17),
+		Vector2(26.96, -13.45), Vector2(26.47, -13.40), Vector2(26.50, -13.29), Vector2(25.90, -12.90), Vector2(25.76, -12.63),
+		Vector2(25.76, -12.45), Vector2(25.82, -12.28), Vector2(25.90, -12.27), Vector2(25.88, -12.39), Vector2(25.94, -12.32),
+		Vector2(25.93, -12.22), Vector2(25.27, -12.00), Vector2(25.49, -12.05), Vector2(25.55, -11.99), Vector2(25.28, -11.89),
+		Vector2(25.14, -11.89), Vector2(25.10, -11.84), Vector2(25.16, -11.82), Vector2(25.12, -11.59), Vector2(24.98, -11.34),
+		Vector2(24.87, -11.48), Vector2(24.95, -11.17), Vector2(24.76, -10.80), Vector2(24.82, -11.02), Vector2(24.72, -11.14),
+		Vector2(24.69, -11.35), Vector2(24.70, -11.06), Vector2(24.64, -11.07), Vector2(24.71, -11.01), Vector2(24.72, -10.71),
+		Vector2(24.77, -10.69), Vector2(24.82, -10.26), Vector2(24.70, -10.03), Vector2(24.50, -9.93), Vector2(24.37, -9.75),
+		Vector2(24.28, -9.73), Vector2(24.15, -9.51), Vector2(23.83, -9.17), Vector2(23.74, -8.99), Vector2(23.71, -8.77),
+		Vector2(23.99, -7.61), Vector2(23.93, -7.12), Vector2(23.87, -7.08), Vector2(23.77, -7.12), Vector2(23.74, -7.25),
+		Vector2(23.67, -7.31), Vector2(23.45, -7.91), Vector2(23.49, -8.11), Vector2(23.29, -8.53), Vector2(23.21, -8.58),
+		Vector2(22.98, -8.45), Vector2(22.89, -8.59), Vector2(22.77, -8.67), Vector2(22.24, -8.64), Vector2(22.16, -8.60),
+		Vector2(22.23, -8.33), Vector2(22.19, -8.29), Vector2(22.12, -8.34), Vector2(22.05, -8.28), Vector2(21.91, -8.29),
+		Vector2(21.77, -8.45), Vector2(21.60, -8.41), Vector2(21.46, -8.48), Vector2(21.18, -8.39), Vector2(21.00, -8.17),
+		Vector2(20.81, -8.04), Vector2(20.66, -7.76), Vector2(20.71, -7.31), Vector2(20.60, -6.84), Vector2(20.57, -6.31),
+		Vector2(20.70, -5.79), Vector2(20.95, -5.27), Vector2(21.15, -5.19), Vector2(21.23, -5.07), Vector2(21.81, -5.28),
+		Vector2(21.93, -5.40), Vector2(22.03, -5.89), Vector2(22.36, -6.03), Vector2(22.65, -6.05), Vector2(22.69, -5.99),
+		Vector2(22.69, -5.85), Vector2(22.54, -5.50), Vector2(22.57, -5.45), Vector2(22.50, -5.10), Vector2(22.41, -5.17),
+		Vector2(22.40, -4.61), Vector2(22.29, -4.43), Vector2(22.35, -4.38), Vector2(22.36, -4.42), Vector2(22.44, -4.37),
+		Vector2(23.04, -4.46), Vector2(23.40, -4.18), Vector2(23.27, -3.08), Vector2(23.58, -2.55), Vector2(23.58, -2.49),
+		Vector2(23.67, -2.50), Vector2(23.72, -2.44), Vector2(24.02, -2.58), Vector2(24.08, -2.67), Vector2(24.37, -2.56),
+		Vector2(24.51, -2.40), Vector2(24.61, -2.39), Vector2(24.75, -2.59), Vector2(24.83, -2.62), Vector2(24.87, -2.95),
+		Vector2(24.98, -3.08), Vector2(25.10, -3.08), Vector2(25.11, -3.14), Vector2(25.26, -3.12), Vector2(25.58, -3.46),
+		Vector2(25.70, -3.37), Vector2(25.66, -3.20), Vector2(25.55, -3.17), Vector2(25.61, -3.04), Vector2(25.61, -2.90),
+		Vector2(25.52, -2.74), Vector2(25.59, -2.52), Vector2(25.68, -2.53), Vector2(25.72, -2.73), Vector2(25.66, -2.83),
+		Vector2(25.65, -3.04), Vector2(25.89, -3.16), Vector2(25.86, -3.29), Vector2(25.93, -3.38), Vector2(26.00, -3.18),
+		Vector2(26.13, -3.18), Vector2(26.26, -3.02), Vector2(26.27, -2.93), Vector2(26.64, -2.96), Vector2(26.75, -2.83),
+		Vector2(26.90, -2.80), Vector2(27.01, -2.88), Vector2(27.01, -2.95), Vector2(27.48, -2.97), Vector2(27.32, -2.89),
+		Vector2(27.38, -2.76), Vector2(27.53, -2.74), Vector2(27.68, -2.60), Vector2(27.71, -2.38), Vector2(27.81, -2.38),
+		Vector2(28.01, -2.22), Vector2(28.13, -2.04), Vector2(28.14, -1.89), Vector2(28.21, -1.89), Vector2(28.39, -1.65),
+		Vector2(28.62, -1.60), Vector2(28.64, -1.65), Vector2(28.79, -1.67), Vector2(29.21, -1.50), Vector2(29.41, -1.26),
+		Vector2(29.44, -1.15), Vector2(29.51, -1.16), Vector2(29.66, -0.53), Vector2(29.76, -0.48), Vector2(29.77, -0.29),
+		Vector2(29.63, -0.06), Vector2(29.69, 0.02), Vector2(30.02, 0.07), Vector2(30.05, 0.32), Vector2(30.18, 0.16),
+		Vector2(30.74, 0.43), Vector2(30.83, 0.59), Vector2(30.81, 0.74), Vector2(31.02, 0.66), Vector2(31.40, 0.81),
+		Vector2(31.68, 0.79), Vector2(31.97, 1.02), Vector2(32.21, 1.33), Vector2(32.36, 1.41), Vector2(32.53, 1.42),
+		Vector2(32.59, 1.51), Vector2(32.69, 2.03), Vector2(32.62, 2.49), Vector2(32.25, 3.06), Vector2(31.98, 3.62),
+		Vector2(31.93, 3.63), Vector2(31.88, 3.84), Vector2(31.89, 4.37), Vector2(31.82, 4.99), Vector2(31.76, 5.10),
+		Vector2(31.73, 5.49), Vector2(31.53, 5.86), Vector2(31.50, 6.16), Vector2(31.34, 6.29), Vector2(31.30, 6.46),
+		Vector2(31.09, 6.46), Vector2(30.79, 6.57), Vector2(30.65, 6.70), Vector2(30.44, 6.79), Vector2(30.21, 7.02),
+		Vector2(30.05, 7.32), Vector2(30.02, 7.54), Vector2(30.05, 7.70), Vector2(29.97, 8.15), Vector2(29.84, 8.31),
+		Vector2(29.63, 8.85), Vector2(29.33, 9.23), Vector2(29.24, 9.53), Vector2(29.03, 9.90), Vector2(28.81, 10.07),
+		Vector2(28.67, 10.01), Vector2(28.57, 10.04), Vector2(28.39, 9.91), Vector2(28.26, 9.92), Vector2(28.14, 9.77),
+		Vector2(28.13, 9.91), Vector2(28.37, 10.18), Vector2(28.35, 10.39), Vector2(28.47, 10.53), Vector2(28.46, 10.69),
+		Vector2(28.27, 11.10), Vector2(27.99, 11.27), Vector2(27.60, 11.34), Vector2(27.39, 11.30), Vector2(27.43, 11.50),
+		Vector2(27.39, 11.74), Vector2(27.43, 11.90), Vector2(27.31, 12.02), Vector2(27.12, 12.07), Vector2(26.93, 11.95),
+		Vector2(26.86, 12.03), Vector2(26.88, 12.36), Vector2(27.01, 12.46), Vector2(27.12, 12.36), Vector2(27.18, 12.53),
+		Vector2(27.00, 12.63), Vector2(26.85, 12.84), Vector2(26.77, 13.36), Vector2(26.59, 13.37), Vector2(26.44, 13.54),
+		Vector2(26.38, 13.80), Vector2(26.57, 14.05), Vector2(26.76, 14.12), Vector2(26.69, 14.44), Vector2(26.46, 14.64),
+		Vector2(26.34, 15.06), Vector2(26.16, 15.20), Vector2(26.09, 15.37), Vector2(26.15, 15.75), Vector2(26.28, 15.97),
+		Vector2(26.02, 15.95), Vector2(25.76, 16.17), Vector2(25.73, 16.52), Vector2(25.65, 16.53), Vector2(25.43, 16.41),
+		Vector2(24.97, 15.93), Vector2(24.91, 15.70), Vector2(24.96, 15.49), Vector2(24.87, 15.24), Vector2(24.84, 14.63),
+		Vector2(24.92, 14.29), Vector2(25.13, 14.02), Vector2(24.84, 13.92), Vector2(25.02, 13.61), Vector2(25.08, 13.05),
+		Vector2(25.30, 13.17), Vector2(25.40, 12.47), Vector2(25.27, 12.38), Vector2(25.21, 12.80), Vector2(25.09, 12.75),
+		Vector2(25.21, 11.66), Vector2(25.30, 11.44), Vector2(25.23, 10.77), Vector2(25.31, 10.76), Vector2(25.64, 9.29),
+		Vector2(25.60, 8.83), Vector2(25.66, 8.58), Vector2(25.63, 8.20), Vector2(25.75, 7.84), Vector2(25.90, 6.00),
+		Vector2(25.85, 5.13), Vector2(25.66, 4.97), Vector2(25.64, 4.85), Vector2(24.91, 4.25), Vector2(24.77, 4.08),
+		Vector2(24.69, 3.85), Vector2(24.72, 3.76), Vector2(24.05, 1.99), Vector2(23.76, 1.70), Vector2(23.82, 1.57),
+		Vector2(23.73, 1.31), Vector2(23.79, 1.12), Vector2(23.94, 0.94), Vector2(24.04, 0.73), Vector2(23.99, 0.63),
+		Vector2(23.93, 0.74), Vector2(23.81, 0.62), Vector2(23.85, 0.54), Vector2(23.82, 0.29), Vector2(23.89, 0.25),
+		Vector2(24.00, -0.10), Vector2(23.98, -0.21), Vector2(24.22, -0.38), Vector2(24.19, -0.47), Vector2(24.27, -0.49),
+		Vector2(24.30, -0.73), Vector2(24.40, -0.75), Vector2(24.55, -1.06), Vector2(24.48, -1.13), Vector2(24.52, -1.29),
+		Vector2(24.47, -1.55), Vector2(24.51, -1.62), Vector2(24.48, -1.85), Vector2(24.30, -2.23), Vector2(24.35, -2.31),
+		Vector2(24.17, -2.49), Vector2(24.08, -2.48), Vector2(23.91, -2.24), Vector2(24.00, -2.09), Vector2(23.83, -2.00),
+		Vector2(23.77, -2.12), Vector2(23.71, -2.13), Vector2(23.67, -2.25), Vector2(23.46, -2.30), Vector2(23.45, -2.24),
+		Vector2(23.29, -2.40), Vector2(23.30, -2.51), Vector2(23.11, -2.67), Vector2(23.05, -2.77), Vector2(23.02, -2.65),
+		Vector2(22.89, -2.81), Vector2(22.91, -2.98), Vector2(22.86, -3.02), Vector2(22.90, -3.08), Vector2(22.53, -3.59),
+		Vector2(22.55, -3.63), Vector2(22.60, -3.61), Vector2(22.50, -3.72), Vector2(22.48, -3.66), Vector2(22.12, -3.76),
+		Vector2(21.96, -3.87), Vector2(21.76, -3.93), Vector2(21.34, -4.44), Vector2(21.18, -4.52), Vector2(20.82, -4.36),
+		Vector2(20.00, -4.79), Vector2(19.79, -5.01), Vector2(19.49, -5.11), Vector2(19.41, -5.24), Vector2(19.20, -5.41),
+		Vector2(19.06, -5.73), Vector2(19.12, -5.76), Vector2(19.15, -6.01), Vector2(19.00, -6.41), Vector2(18.55, -7.11),
+		Vector2(18.35, -7.30), Vector2(18.38, -7.48), Vector2(18.16, -7.70), Vector2(18.12, -7.90), Vector2(18.01, -7.93),
+		Vector2(17.81, -8.23), Vector2(17.63, -8.79), Vector2(17.64, -8.90), Vector2(17.50, -9.02), Vector2(17.43, -9.01),
+		Vector2(17.32, -9.10), Vector2(17.29, -8.97), Vector2(17.34, -8.60), Vector2(17.81, -7.70), Vector2(17.93, -7.55),
+		Vector2(18.11, -6.85), Vector2(18.21, -6.84), Vector2(18.35, -6.53), Vector2(18.23, -6.42), Vector2(18.18, -6.60),
+		Vector2(17.82, -6.98), Vector2(17.80, -7.36), Vector2(17.57, -7.58), Vector2(17.55, -7.54), Vector2(17.28, -7.89),
+		Vector2(17.36, -7.87), Vector2(17.43, -7.98), Vector2(17.44, -8.12), Vector2(17.18, -8.41), Vector2(16.84, -9.48),
+		Vector2(16.71, -9.66), Vector2(16.63, -9.69), Vector2(16.60, -9.78), Vector2(16.50, -9.80), Vector2(16.43, -9.88),
+		Vector2(16.25, -9.91), Vector2(16.20, -9.96), Vector2(16.18, -10.14), Vector2(15.99, -10.45), Vector2(15.84, -10.97),
+		Vector2(15.60, -11.34), Vector2(15.58, -11.61), Vector2(15.48, -11.79), Vector2(15.51, -12.34), Vector2(15.45, -12.60),
+		Vector2(15.52, -12.91), Vector2(15.57, -13.53), Vector2(15.42, -14.46), Vector2(15.44, -14.53), Vector2(15.72, -14.41),
+		Vector2(15.83, -14.09), Vector2(15.87, -14.17), Vector2(15.75, -14.75), Vector2(15.24, -15.26), Vector2(14.89, -15.41),
+		Vector2(14.79, -15.73), Vector2(14.81, -15.96), Vector2(14.57, -16.12), Vector2(14.53, -16.42), Vector2(14.30, -16.70),
+		Vector2(14.30, -16.89), Vector2(14.02, -17.16), Vector2(13.97, -17.50), Vector2(13.72, -17.82), Vector2(13.62, -18.19),
+		Vector2(13.13, -18.23), Vector2(12.90, -18.35), Vector2(12.51, -18.77), Vector2(11.99, -18.99), Vector2(11.72, -18.96),
+		Vector2(11.34, -19.15), Vector2(11.11, -19.33), Vector2(10.90, -19.24), Vector2(10.94, -18.95), Vector2(10.61, -18.84),
+		Vector2(10.44, -18.70), Vector2(10.23, -18.61), Vector2(10.20, -18.85), Vector2(10.29, -19.26), Vector2(10.49, -19.39),
+		Vector2(10.44, -19.50), Vector2(10.20, -19.26), Vector2(10.06, -18.98), Vector2(9.79, -18.69), Vector2(9.93, -18.49),
+		Vector2(9.75, -18.20), Vector2(9.35, -17.91), Vector2(9.30, -17.74), Vector2(9.00, -17.54), Vector2(8.94, -17.35),
+		Vector2(8.72, -17.19), Vector2(8.58, -17.22), Vector2(8.05, -16.85), Vector2(7.72, -16.74), Vector2(7.69, -16.80),
+		Vector2(8.29, -17.31), Vector2(8.53, -17.36), Vector2(8.63, -17.52), Vector2(9.08, -17.97), Vector2(9.19, -18.50),
+		Vector2(8.99, -18.39), Vector2(8.92, -18.46), Vector2(8.82, -18.32), Vector2(8.69, -18.50), Vector2(8.64, -18.38),
+		Vector2(8.57, -18.58), Vector2(8.38, -18.42), Vector2(8.26, -18.42), Vector2(8.28, -18.81), Vector2(8.16, -18.95),
+		Vector2(7.91, -18.88), Vector2(7.61, -19.17), Vector2(7.61, -19.41), Vector2(7.46, -19.59), Vector2(7.54, -19.83),
+		Vector2(7.70, -20.07), Vector2(7.76, -20.29), Vector2(7.92, -20.32), Vector2(8.05, -20.25), Vector2(8.21, -20.47),
+		Vector2(8.35, -20.43), Vector2(8.49, -20.56), Vector2(8.46, -20.76), Vector2(8.35, -20.84), Vector2(8.47, -21.02),
+		Vector2(8.17, -20.91), Vector2(8.11, -20.82), Vector2(7.96, -20.91), Vector2(7.69, -20.86), Vector2(7.41, -20.97),
+		Vector2(7.33, -21.15), Vector2(7.08, -21.41), Vector2(7.78, -21.83), Vector2(7.94, -21.83), Vector2(7.91, -21.60),
+		Vector2(8.32, -21.62), Vector2(8.16, -21.90), Vector2(7.93, -22.08), Vector2(7.61, -22.52), Vector2(7.34, -22.67),
+		Vector2(7.45, -22.92), Vector2(7.79, -22.94), Vector2(8.03, -23.16), Vector2(8.08, -23.40), Vector2(8.27, -23.63),
+		Vector2(8.46, -23.69), Vector2(8.82, -23.91), Vector2(9.00, -23.88), Vector2(9.30, -24.15), Vector2(9.59, -24.04),
+		Vector2(9.73, -23.81), Vector2(9.81, -23.91), Vector2(10.14, -23.88), Vector2(10.12, -23.76), Vector2(10.42, -23.68),
+		Vector2(10.61, -23.73), Vector2(11.02, -23.57), Vector2(11.39, -23.53), Vector2(11.54, -23.46), Vector2(11.79, -23.54),
+		Vector2(12.65, -23.21), Vector2(12.95, -22.97), Vector2(13.15, -22.93), Vector2(13.32, -23.13), Vector2(13.55, -23.28),
+		Vector2(13.84, -23.22), Vector2(14.13, -23.44), Vector2(14.44, -23.56), Vector2(14.57, -23.36), Vector2(14.71, -23.47),
+		Vector2(14.76, -23.71), Vector2(14.89, -23.65), Vector2(15.21, -23.21), Vector2(15.47, -23.54), Vector2(15.50, -23.17),
+		Vector2(15.73, -23.25), Vector2(15.80, -23.39), Vector2(16.04, -23.37), Vector2(16.33, -23.16), Vector2(17.04, -22.90),
+		Vector2(17.23, -22.93), Vector2(17.49, -22.69), Vector2(17.24, -22.45), Vector2(17.57, -22.35), Vector2(18.09, -22.40),
+		Vector2(18.25, -22.49), Vector2(18.45, -22.20), Vector2(18.66, -22.44), Vector2(18.47, -22.65), Vector2(18.59, -22.81),
+		Vector2(18.98, -22.88), Vector2(19.13, -22.76), Vector2(19.33, -22.51), Vector2(19.54, -22.54), Vector2(19.88, -22.33),
+		Vector2(20.18, -22.40), Vector2(20.46, -22.39), Vector2(20.44, -22.69), Vector2(20.61, -22.77), Vector2(20.90, -22.61),
+		Vector2(20.92, -22.23), Vector2(21.03, -22.54), Vector2(21.18, -22.53), Vector2(21.27, -23.01), Vector2(21.06, -23.31),
+		Vector2(20.84, -23.51), Vector2(20.85, -24.06), Vector2(21.08, -24.43),
+	],
+	[
+		Vector2(17.44, -25.06), Vector2(17.36, -24.82), Vector2(17.77, -24.97), Vector2(18.04, -24.71), Vector2(18.26, -24.98),
+		Vector2(18.43, -24.80), Vector2(18.60, -24.32), Vector2(18.68, -24.51), Vector2(18.55, -25.04), Vector2(18.72, -25.12),
+		Vector2(18.91, -25.04), Vector2(19.12, -24.83), Vector2(19.30, -23.96), Vector2(19.97, -23.48), Vector2(19.95, -23.26),
+		Vector2(19.64, -23.22), Vector2(19.76, -23.03), Vector2(19.69, -22.86), Vector2(19.02, -23.06), Vector2(18.79, -23.03),
+		Vector2(18.43, -22.87), Vector2(17.60, -22.75), Vector2(17.50, -22.98), Vector2(17.24, -23.11), Vector2(17.07, -23.06),
+		Vector2(16.83, -23.45), Vector2(17.25, -23.58), Vector2(17.53, -23.56), Vector2(17.75, -23.66), Vector2(17.40, -23.76),
+		Vector2(16.72, -23.73), Vector2(16.62, -23.92), Vector2(17.02, -24.12), Vector2(16.77, -24.11), Vector2(16.43, -24.25),
+		Vector2(16.73, -24.84), Vector2(17.24, -25.16),
+	],
+	[
+		Vector2(19.30, -25.22), Vector2(19.13, -24.87), Vector2(18.83, -25.24), Vector2(18.89, -25.32), Vector2(19.15, -25.34),
+	],
+	[
+		Vector2(24.37, -25.34), Vector2(24.70, -25.05), Vector2(24.72, -24.91), Vector2(24.31, -24.93), Vector2(24.10, -24.86),
+		Vector2(23.83, -25.17), Vector2(23.84, -25.37), Vector2(23.93, -25.40),
+	],
+	[
+		Vector2(22.74, -25.08), Vector2(22.90, -24.77), Vector2(23.07, -25.18), Vector2(23.56, -25.40), Vector2(23.88, -24.85),
+		Vector2(23.86, -24.51), Vector2(24.24, -24.66), Vector2(24.42, -24.87), Vector2(24.84, -24.60), Vector2(25.11, -24.36),
+		Vector2(25.13, -24.13), Vector2(25.49, -24.25), Vector2(25.69, -23.92), Vector2(26.15, -23.73), Vector2(26.32, -23.53),
+		Vector2(26.50, -23.07), Vector2(26.15, -22.84), Vector2(26.60, -22.53), Vector2(26.91, -22.42), Vector2(27.18, -21.99),
+		Vector2(27.48, -21.96), Vector2(27.42, -21.64), Vector2(27.09, -21.11), Vector2(26.85, -21.30), Vector2(26.55, -21.74),
+		Vector2(26.30, -21.69), Vector2(26.28, -21.42), Vector2(26.48, -21.16), Vector2(26.74, -20.95), Vector2(26.82, -20.84),
+		Vector2(26.94, -20.40), Vector2(26.88, -20.09), Vector2(26.19, -20.50), Vector2(26.62, -19.92), Vector2(26.66, -19.77),
+		Vector2(26.14, -19.94), Vector2(25.72, -20.19), Vector2(25.49, -20.40), Vector2(25.56, -20.53), Vector2(24.99, -20.95),
+		Vector2(24.99, -20.84), Vector2(24.44, -20.77), Vector2(24.28, -20.92), Vector2(24.40, -21.25), Vector2(25.16, -21.32),
+		Vector2(25.10, -21.48), Vector2(25.16, -21.71), Vector2(25.41, -22.16), Vector2(25.28, -22.53), Vector2(24.99, -22.76),
+		Vector2(24.60, -22.93), Vector2(24.72, -23.05), Vector2(24.52, -23.35), Vector2(24.35, -23.38), Vector2(24.20, -23.55),
+		Vector2(24.10, -23.40), Vector2(23.75, -23.34), Vector2(23.05, -23.45), Vector2(22.33, -23.67), Vector2(22.17, -23.85),
+		Vector2(22.36, -24.08), Vector2(22.10, -24.08), Vector2(22.04, -24.60), Vector2(22.19, -25.07), Vector2(22.39, -25.28),
+		Vector2(22.88, -25.43),
+	],
+	[
+		Vector2(20.32, -25.33), Vector2(20.66, -25.40), Vector2(20.71, -25.25), Vector2(20.53, -24.99), Vector2(20.82, -24.77),
+		Vector2(20.79, -24.30), Vector2(20.47, -24.10), Vector2(20.29, -24.15), Vector2(20.16, -24.34), Vector2(19.68, -24.74),
+		Vector2(19.68, -24.91), Vector2(20.07, -24.86), Vector2(19.86, -25.19), Vector2(20.09, -25.45),
+	],
+	[
+		Vector2(-2.21, -25.25), Vector2(-2.19, -25.11), Vector2(-2.91, -25.19), Vector2(-2.72, -25.40), Vector2(-2.48, -25.45),
+	],
+	[
+		Vector2(21.62, -25.59), Vector2(21.98, -25.45), Vector2(21.70, -24.98), Vector2(21.47, -24.88), Vector2(21.26, -24.49),
+		Vector2(21.04, -24.51), Vector2(20.92, -24.97), Vector2(20.92, -25.23), Vector2(21.02, -25.46), Vector2(21.22, -25.60),
+	],
+	[
+		Vector2(16.30, -25.66), Vector2(16.79, -25.63), Vector2(17.18, -25.25), Vector2(16.47, -24.75), Vector2(16.23, -24.38),
+		Vector2(16.23, -24.17), Vector2(15.73, -23.92), Vector2(15.62, -24.14), Vector2(15.18, -24.41), Vector2(15.56, -25.36),
+		Vector2(15.38, -25.69), Vector2(16.02, -25.77),
+	],
+	[
+		Vector2(-0.82, -26.12), Vector2(-1.04, -25.91), Vector2(-1.35, -25.96), Vector2(-1.71, -26.17), Vector2(-1.66, -26.35),
+	],
+	[
+		Vector2(21.32, -26.24), Vector2(21.39, -26.07), Vector2(21.28, -25.85), Vector2(21.00, -25.89), Vector2(20.77, -26.04),
+		Vector2(20.87, -26.29), Vector2(21.15, -26.44),
+	],
+	[
+		Vector2(-2.60, -26.69), Vector2(-1.90, -26.39), Vector2(-2.05, -25.98), Vector2(-2.76, -25.99), Vector2(-3.08, -25.86),
+		Vector2(-3.46, -26.22), Vector2(-3.36, -26.61), Vector2(-3.10, -26.72),
+	],
+	[
+		Vector2(20.59, -26.78), Vector2(20.60, -26.49), Vector2(20.51, -26.08), Vector2(20.20, -26.02), Vector2(19.99, -26.11),
+		Vector2(19.99, -26.43), Vector2(19.68, -26.39), Vector2(19.67, -26.83), Vector2(19.87, -26.81), Vector2(20.16, -27.01),
+		Vector2(20.43, -26.97), Vector2(20.45, -27.05),
+	],
+	[
+		Vector2(18.52, -27.03), Vector2(18.66, -26.55), Vector2(18.83, -26.64), Vector2(19.03, -26.62), Vector2(19.06, -26.34),
+		Vector2(18.95, -26.08), Vector2(18.30, -25.99), Vector2(17.81, -25.76), Vector2(17.52, -25.75), Vector2(17.50, -25.92),
+		Vector2(17.86, -26.16), Vector2(17.03, -26.10), Vector2(16.76, -26.20), Vector2(17.02, -26.75), Vector2(17.20, -26.91),
+		Vector2(17.74, -26.72), Vector2(18.08, -26.38), Vector2(18.41, -26.35), Vector2(18.14, -26.88), Vector2(18.32, -27.09),
+	],
+	[
+		Vector2(-16.54, -26.95), Vector2(-16.67, -26.77), Vector2(-17.94, -26.22), Vector2(-18.53, -25.70), Vector2(-19.12, -24.67),
+		Vector2(-19.08, -24.24), Vector2(-18.71, -23.82), Vector2(-18.83, -23.78), Vector2(-19.45, -23.85), Vector2(-19.50, -24.07),
+		Vector2(-19.85, -24.21), Vector2(-19.88, -24.48), Vector2(-19.68, -24.59), Vector2(-19.69, -24.88), Vector2(-19.31, -25.33),
+		Vector2(-19.49, -25.40), Vector2(-19.03, -25.87), Vector2(-19.08, -26.12), Vector2(-18.02, -26.78), Vector2(-17.38, -26.89),
+		Vector2(-17.05, -27.10), Vector2(-16.67, -27.18),
+	],
+	[
+		Vector2(21.18, -27.27), Vector2(21.39, -27.08), Vector2(21.77, -27.08), Vector2(21.94, -26.89), Vector2(21.89, -26.68),
+		Vector2(22.11, -26.55), Vector2(22.24, -26.42), Vector2(22.78, -26.35), Vector2(23.08, -26.47), Vector2(23.47, -26.52),
+		Vector2(23.78, -26.48), Vector2(23.99, -26.26), Vector2(24.03, -26.04), Vector2(23.91, -25.89), Vector2(23.63, -25.77),
+		Vector2(23.38, -25.84), Vector2(22.44, -25.74), Vector2(21.61, -25.99), Vector2(21.53, -26.57), Vector2(21.33, -26.82),
+		Vector2(20.94, -26.89), Vector2(20.71, -27.07), Vector2(20.78, -27.31),
+	],
+	[
+		Vector2(17.02, -27.14), Vector2(16.88, -26.94), Vector2(16.70, -26.91), Vector2(16.34, -26.67), Vector2(16.03, -26.58),
+		Vector2(15.77, -26.70), Vector2(16.10, -27.13), Vector2(16.49, -27.51), Vector2(16.79, -27.50), Vector2(17.05, -27.59),
+	],
+	[
+		Vector2(21.23, -27.69), Vector2(21.37, -27.58), Vector2(21.34, -27.52), Vector2(20.90, -27.54), Vector2(20.84, -27.70),
+	],
+	[
+		Vector2(18.27, -27.80), Vector2(18.20, -27.62), Vector2(17.85, -27.45), Vector2(17.56, -27.64), Vector2(17.72, -27.83),
+		Vector2(18.00, -27.89),
+	],
+	[
+		Vector2(-25.29, -27.85), Vector2(-25.01, -27.71), Vector2(-25.44, -27.47), Vector2(-25.78, -27.61), Vector2(-25.65, -27.76),
+		Vector2(-25.76, -27.95), Vector2(-25.37, -28.07),
+	],
+	[
+		Vector2(18.30, -28.16), Vector2(18.07, -28.04), Vector2(17.75, -28.05), Vector2(17.76, -28.13), Vector2(17.95, -28.31),
+	],
+	[
+		Vector2(20.78, -28.26), Vector2(21.01, -28.05), Vector2(20.96, -27.83), Vector2(20.68, -27.71), Vector2(20.52, -27.85),
+		Vector2(20.44, -28.08), Vector2(20.42, -28.33),
+	],
+	[
+		Vector2(19.48, -28.51), Vector2(20.00, -28.28), Vector2(20.22, -27.75), Vector2(19.91, -27.81), Vector2(19.59, -28.01),
+		Vector2(19.17, -28.03), Vector2(19.35, -28.21), Vector2(19.12, -28.36), Vector2(19.11, -28.59),
+	],
+	[
+		Vector2(-10.02, -28.58), Vector2(-9.53, -28.23), Vector2(-9.59, -27.98), Vector2(-10.67, -27.75), Vector2(-10.32, -28.55),
+		Vector2(-10.16, -28.62),
+	],
+	[
+		Vector2(-25.62, -28.38), Vector2(-26.11, -28.14), Vector2(-26.21, -27.70), Vector2(-26.38, -27.59), Vector2(-26.47, -27.10),
+		Vector2(-26.70, -27.08), Vector2(-27.12, -27.43), Vector2(-26.94, -27.64), Vector2(-27.23, -27.82), Vector2(-27.61, -28.33),
+		Vector2(-27.75, -28.81), Vector2(-27.23, -29.03), Vector2(-27.13, -28.81), Vector2(-26.85, -28.82), Vector2(-26.78, -29.04),
+		Vector2(-26.50, -29.06),
+	],
+	[
+		Vector2(-24.87, -29.29), Vector2(-24.50, -29.06), Vector2(-24.78, -28.73), Vector2(-25.34, -28.65), Vector2(-25.91, -28.76),
+		Vector2(-25.94, -28.93), Vector2(-26.22, -28.94), Vector2(-26.43, -29.23), Vector2(-25.83, -29.34), Vector2(-25.55, -29.25),
+		Vector2(-25.36, -29.34),
+	],
+	[
+		Vector2(-19.94, -29.34), Vector2(-20.37, -29.24), Vector2(-20.40, -29.14), Vector2(-20.62, -29.03), Vector2(-20.83, -29.18),
+		Vector2(-20.74, -29.34),
+	],
+	[
+		Vector2(-10.97, -29.34), Vector2(-10.52, -28.89), Vector2(-10.57, -28.33), Vector2(-10.99, -28.26), Vector2(-11.53, -28.43),
+		Vector2(-11.84, -28.67), Vector2(-11.99, -29.12), Vector2(-12.25, -29.24), Vector2(-11.75, -29.34),
+	],
+	[
+		Vector2(22.19, -29.34), Vector2(22.50, -29.23), Vector2(22.65, -28.81), Vector2(22.88, -28.61), Vector2(22.62, -28.43),
+		Vector2(22.27, -27.97), Vector2(21.93, -27.93), Vector2(21.53, -28.01), Vector2(21.32, -28.25), Vector2(21.32, -28.48),
+		Vector2(21.46, -28.64), Vector2(21.12, -28.63), Vector2(20.91, -28.84), Vector2(20.79, -29.13), Vector2(20.92, -29.34),
+	],
+	[
+		Vector2(26.02, -29.34), Vector2(25.69, -28.90), Vector2(25.30, -28.80), Vector2(25.18, -28.67), Vector2(24.64, -28.59),
+		Vector2(24.86, -28.53), Vector2(24.73, -28.42), Vector2(24.88, -28.12), Vector2(24.70, -27.91), Vector2(24.41, -27.74),
+		Vector2(24.31, -27.51), Vector2(24.05, -27.33), Vector2(24.07, -27.20), Vector2(24.40, -27.22), Vector2(24.41, -27.08),
+		Vector2(23.89, -26.74), Vector2(23.39, -26.90), Vector2(22.83, -26.81), Vector2(22.18, -26.91), Vector2(22.15, -27.18),
+		Vector2(22.51, -27.32), Vector2(22.41, -27.74), Vector2(22.53, -27.78), Vector2(23.02, -27.56), Vector2(22.78, -27.91),
+		Vector2(22.47, -28.02), Vector2(22.63, -28.26), Vector2(22.97, -28.40), Vector2(23.02, -28.62), Vector2(22.75, -28.86),
+		Vector2(22.67, -29.19), Vector2(23.19, -29.16), Vector2(23.35, -29.09), Vector2(23.62, -29.32), Vector2(23.21, -29.34),
+	],
+	[
+		Vector2(36.23, -29.34), Vector2(36.12, -29.25), Vector2(35.60, -29.13), Vector2(35.96, -29.11), Vector2(35.58, -28.25),
+		Vector2(35.58, -27.59), Vector2(35.81, -27.20), Vector2(35.51, -27.18), Vector2(35.20, -27.00), Vector2(35.55, -26.69),
+		Vector2(35.60, -26.22), Vector2(35.39, -26.16), Vector2(35.64, -25.69), Vector2(35.23, -25.64), Vector2(35.44, -25.43),
+		Vector2(35.37, -25.24), Vector2(35.10, -25.16), Vector2(34.84, -25.15), Vector2(35.08, -24.80), Vector2(35.08, -24.57),
+		Vector2(34.70, -24.79), Vector2(34.60, -24.65), Vector2(34.86, -24.52), Vector2(35.11, -24.20), Vector2(35.18, -23.80),
+		Vector2(34.84, -23.70), Vector2(34.46, -24.15), Vector2(34.52, -23.84), Vector2(34.32, -23.58), Vector2(35.07, -23.53),
+		Vector2(34.03, -22.72), Vector2(33.47, -22.56), Vector2(33.26, -22.55), Vector2(33.06, -22.37), Vector2(32.79, -21.88),
+		Vector2(32.38, -21.56), Vector2(31.72, -21.32), Vector2(31.55, -21.04), Vector2(31.55, -20.73), Vector2(31.45, -20.44),
+		Vector2(31.14, -20.09), Vector2(31.22, -19.76), Vector2(31.03, -19.00), Vector2(30.76, -18.97), Vector2(30.48, -19.31),
+		Vector2(30.09, -19.32), Vector2(29.91, -19.55), Vector2(29.78, -19.96), Vector2(29.45, -20.50), Vector2(29.35, -20.79),
+		Vector2(29.32, -21.19), Vector2(29.06, -21.61), Vector2(29.13, -21.95), Vector2(29.00, -22.11), Vector2(29.19, -22.67),
+		Vector2(29.48, -22.85), Vector2(29.55, -23.05), Vector2(29.58, -23.42), Vector2(29.27, -23.18), Vector2(29.10, -23.11),
+		Vector2(28.86, -23.27), Vector2(28.85, -23.61), Vector2(28.92, -23.88), Vector2(29.10, -23.88), Vector2(29.46, -23.78),
+		Vector2(28.99, -24.24), Vector2(28.80, -24.17), Vector2(28.64, -24.30), Vector2(28.85, -24.78), Vector2(28.35, -25.92),
+		Vector2(28.11, -26.13), Vector2(28.11, -26.37), Vector2(27.60, -26.70), Vector2(27.19, -26.74), Vector2(26.21, -26.67),
+		Vector2(25.65, -27.22), Vector2(26.15, -27.40), Vector2(26.46, -27.45), Vector2(25.72, -27.58), Vector2(25.29, -27.83),
+		Vector2(25.31, -28.06), Vector2(26.74, -28.65), Vector2(26.82, -28.88), Vector2(26.30, -29.10), Vector2(26.47, -29.34),
 	],
 ]
 
-## Coastal (z = 1 major, 0 minor) and inland (z = 2) city lights: x, y in map coordinates.
+## Global coastal (z = 1 major, 0 minor) and inland (z = 2) city lights.
 const CITY_LIGHTS := [
-	Vector3(-19.4, 3.73, 1), Vector3(-18.42, 2.96, 1), Vector3(-16.46, 2.81, 1), Vector3(-14.98, 1.82, 1),
-	Vector3(-14.48, 0.84, 1), Vector3(-14.38, -0.61, 1), Vector3(-11.83, -3.09, 1), Vector3(-10.8, -5.64, 0),
-	Vector3(-8.63, -5.59, 1), Vector3(-8.07, -5.36, 0), Vector3(-6.73, -6.11, 1), Vector3(-5.07, -7.03, 1),
-	Vector3(-3.7, -5.91, 0), Vector3(-1.7, -3.58, 1), Vector3(0.25, -2.41, 1), Vector3(-0.64, 1.14, 1),
-	Vector3(1.09, 1.95, 0), Vector3(2.87, -2.76, 1), Vector3(-1.67, -8.37, 1), Vector3(-0.23, -8.64, 0),
-	Vector3(2.44, -5.86, 0), Vector3(4.09, -4.74, 0), Vector3(5.45, -3.02, 0), Vector3(9.66, 1.35, 1),
-	Vector3(8.94, -2.13, 1), Vector3(13.14, 0.75, 1), Vector3(14.98, -2.61, 1), Vector3(15.06, -1.55, 0),
-	Vector3(16.7, 2.74, 1), Vector3(18.0, 3.19, 0), Vector3(20.63, 2.86, 1), Vector3(22.17, 3.13, 0),
-	Vector3(21.78, 4.52, 0), Vector3(21.5, 6.64, 1), Vector3(20.99, 8.07, 0), Vector3(20.78, 9.0, 1),
-	Vector3(20.46, 9.75, 0), Vector3(18.3, 10.06, 0), Vector3(15.92, 10.14, 1), Vector3(6.07, 8.94, 1),
-	Vector3(-0.81, 7.94, 1), Vector3(-3.82, 2.86, 1), Vector3(-3.24, 5.54, 0), Vector3(-10.94, 2.93, 1),
-	Vector3(-14.63, 4.29, 1), Vector3(-19.8, 4.21, 0), Vector3(0.51, 4.03, 0), Vector3(11.13, 4.76, 0),
-	Vector3(19.36, 4.98, 0), Vector3(13.91, -5.47, 0), Vector3(14.63, -6.72, 0), Vector3(16.73, -9.72, 1),
-	Vector3(19.52, -7.28, 0), Vector3(22.33, -2.98, 0), Vector3(13.47, -4.55, 0), Vector3(-5.26, -3.8, 0),
-	Vector3(-4.89, -0.29, 0), Vector3(-11.35, -0.74, 0), Vector3(13.43, 2.55, 0), Vector3(7.73, 0.98, 0),
-	Vector3(17.8, -3.19, 0), Vector3(12.4, -1.49, 0), Vector3(17.24, 11.65, 2), Vector3(22.3, 7.14, 2),
-	Vector3(18.86, -1.21, 2), Vector3(-17.7, -1.85, 2), Vector3(-9.17, -8.79, 2), Vector3(-4.81, -8.4, 2),
-	Vector3(9.32, -4.81, 2), Vector3(12.1, -7.06, 2), Vector3(6.46, -7.53, 2), Vector3(1.98, -8.85, 2),
-	Vector3(-2.75, -6.2, 2), Vector3(21.93, 9.17, 2), Vector3(15.0, 1.56, 2), Vector3(16.5, -1.04, 2),
-	Vector3(-14.89, -3.44, 2), Vector3(-12.56, -5.98, 2),
+	Vector3(-29.78, -15.65, 1), Vector3(-31.51, -11.26, 1), Vector3(-29.34, -12.14, 1), Vector3(-28.72, -12.78, 0),
+	Vector3(-27.36, -12.31, 1), Vector3(-27.40, -13.49, 0), Vector3(-25.21, -11.04, 1), Vector3(-24.19, -12.01, 1),
+	Vector3(-24.56, -11.17, 0), Vector3(-23.87, -13.87, 0), Vector3(-24.02, -8.91, 1), Vector3(-29.16, -10.65, 0),
+	Vector3(-29.32, -14.71, 2), Vector3(-27.19, -16.02, 2), Vector3(-22.54, -17.28, 2), Vector3(-32.93, -4.09, 0),
+	Vector3(-29.11, -1.80, 1), Vector3(-26.23, 9.74, 1), Vector3(-23.81, 8.52, 0), Vector3(-22.21, 1.88, 0),
+	Vector3(-22.14, 1.11, 0), Vector3(-22.23, -6.04, 1), Vector3(-19.14, -7.15, 1), Vector3(-18.55, -6.65, 0),
+	Vector3(-16.90, -7.03, 1), Vector3(-15.76, -5.34, 1), Vector3(-14.34, -3.64, 1), Vector3(-12.79, -6.35, 1),
+	Vector3(-14.42, -1.91, 0), Vector3(-7.51, 9.16, 1), Vector3(-23.77, -8.55, 2), Vector3(-22.69, 0.36, 2),
+	Vector3(-14.94, -8.13, 2), Vector3(-9.83, -0.37, 1), Vector3(-9.25, 1.72, 1), Vector3(-8.12, 2.01, 0),
+	Vector3(-10.46, -3.83, 1), Vector3(-9.29, -3.00, 1), Vector3(-6.53, -4.06, 1), Vector3(-5.64, -1.97, 0),
+	Vector3(-7.83, -6.27, 1), Vector3(-6.43, -7.06, 1), Vector3(-6.43, -8.91, 1), Vector3(-6.64, -10.43, 0),
+	Vector3(-4.97, -10.15, 1), Vector3(-5.38, -10.91, 1), Vector3(-3.74, -9.99, 1), Vector3(-2.94, -10.31, 1),
+	Vector3(-2.63, -12.71, 0), Vector3(-4.44, -12.71, 0), Vector3(-7.41, -11.65, 2), Vector3(-0.73, 9.74, 1),
+	Vector3(-1.92, 10.97, 1), Vector3(-0.38, 7.80, 1), Vector3(3.80, 10.65, 1), Vector3(4.49, 5.06, 0),
+	Vector3(9.04, -5.98, 1), Vector3(10.58, -19.46, 0), Vector3(15.72, -14.86, 1), Vector3(15.88, -14.25, 1),
+	Vector3(15.86, -10.97, 1), Vector3(16.67, -9.77, 1), Vector3(20.18, -4.72, 0), Vector3(24.10, -2.49, 1),
+	Vector3(24.58, 3.33, 1), Vector3(25.61, 9.46, 1), Vector3(21.04, -8.49, 1), Vector3(20.91, -5.37, 0),
+	Vector3(23.54, -6.50, 1), Vector3(25.94, -5.17, 0), Vector3(24.86, -2.89, 0), Vector3(23.96, -7.29, 1),
+	Vector3(25.15, -11.91, 1), Vector3(25.73, -12.47, 1), Vector3(27.15, -13.22, 0), Vector3(-33.96, -20.71, 0),
+	Vector3(32.66, 2.22, 1), Vector3(31.97, 3.61, 0), Vector3(31.07, 6.44, 1), Vector3(30.41, 6.62, 1),
+	Vector3(28.15, 9.96, 1), Vector3(28.57, 10.06, 0), Vector3(20.33, -5.43, 2), Vector3(22.54, -12.31, 2),
+	Vector3(-23.40, -22.98, 0), Vector3(-26.11, -23.27, 0), Vector3(29.43, -20.75, 0),
 ]
-
 
 class RegionView extends RefCounted:
 	var id: String = ""
@@ -285,8 +1019,10 @@ class RegionView extends RefCounted:
 	var status_label: Label3D = null
 	var name_size: Vector2 = Vector2.ZERO                  # label text size in world units
 	var status_size: Vector2 = Vector2.ZERO
-	var outline_mi: MeshInstance3D = null
+	var outline_mi: Node3D = null
 	var outline_mat: ShaderMaterial = null
+	var combo_root: Node3D = null
+	var combo_active: bool = false
 	var health: float = 0.5
 	var health_goal: float = 0.5
 	var pollution: float = 0.5
@@ -295,6 +1031,9 @@ class RegionView extends RefCounted:
 	var coral_goal: float = 0.5
 	var grass: float = 0.5
 	var grass_goal: float = 0.5
+	var bio: float = 0.5
+	var bio_goal: float = 0.5
+	var spread_risk: float = 0.0
 	var crisis: float = 50.0
 	var crisis_goal: float = 50.0
 	var protection: float = 0.0
@@ -333,9 +1072,15 @@ var _selected: String = ""
 var _pending_flashes: Array = []   # [[seconds_left: float, region_id: String], ...]
 var _label_font: Font = null
 var _hero_label: Label3D = null
+var _hero_root: Node3D = null
+var _sea_floor: MeshInstance3D = null
+var _grid_mats: Array = []
 var _label_alpha: float = 0.0
 var _hero_alpha: float = 1.0
 var _end_open: bool = false        # menu mode is showing the end screen (hero label hidden)
+var _map_layer: int = 0            # 0=standard, 1=threat&shield, 2=bio-map
+var _fleet_root: Node3D = null
+var _fleet_nodes: Array = []
 
 var _cam_target: Vector3 = MENU_TARGET
 var _cam_dist: float = MENU_DIST
@@ -346,6 +1091,10 @@ var _shake: float = 0.0
 var _shake_peak: float = 0.0
 var _user_zoom: float = 1.0
 var _user_pan: Vector3 = Vector3.ZERO
+var _has_pan_goal: bool = false
+var _pan_goal: Vector2 = Vector2.ZERO
+var _pan_before_select: Vector2 = Vector2.ZERO
+var _did_select_pan: bool = false
 var _touches: Dictionary = {}
 var _touch_start: Vector2 = Vector2.ZERO
 var _touch_dragged: bool = false
@@ -355,6 +1104,7 @@ var _living_root: Node3D = null
 var _ships: Array = []          # [{"node": Node3D, "region": String, "center": Vector2, "angle": float, "speed": float, "rx": float, "rz": float}]
 var _turbines: Array = []       # [{"root": Node3D, "rotor": Node3D, "region": String}]
 var _city_lights: Array = []    # [{"mi": MeshInstance3D, "mat": StandardMaterial3D, "phase": float}]
+var _land_polys: Array = []     # PackedVector2Array list populated in _build_land for surface Y lookups
 
 var _mouse_pos: Vector2 = Vector2.ZERO
 var _mouse_on_map: bool = false
@@ -390,6 +1140,7 @@ func build_step_2_regions() -> void:
 
 func build_step_3_finish() -> void:
 	_build_hero()
+	_build_fleet()
 	_build_living_map()
 	_build_labels()
 	_connect_bus()
@@ -418,6 +1169,7 @@ func set_menu_mode(on: bool) -> void:
 		_end_open = false
 	_menu_mode = on
 	if on:
+		_map_layer = 0
 		_mouse_on_map = false
 		_user_zoom = 1.0
 		_user_pan = Vector3.ZERO
@@ -443,7 +1195,7 @@ func unproject_region(region_id: String) -> Vector2:
 	if camera == null or not camera.is_inside_tree() or not RegionData.DEFS.has(region_id):
 		return Vector2.ZERO
 	var a: Vector2 = RegionData.anchor_of(region_id)
-	return camera.unproject_position(Vector3(a.x, SEA_Y, a.y))
+	return camera.unproject_position(Vector3(_nearest_wrap_x(a.x), SEA_Y, a.y))
 
 
 # =====================================================================================
@@ -483,15 +1235,17 @@ func _grid_material(layer: int) -> ShaderMaterial:
 	mat.set_shader_parameter("bg_color", UITheme.BG)
 	mat.set_shader_parameter("deep_color", UITheme.BG.lerp(Color(0.02, 0.08, 0.13), 0.35))
 	mat.set_shader_parameter("grid_color", UITheme.HEALTHY.lerp(UITheme.TEXT_DIM, 0.55))
-	mat.set_shader_parameter("land_color", UITheme.BG.lerp(UITheme.ASH, 0.24).lerp(UITheme.TERRACOTTA, 0.04))
+	mat.set_shader_parameter("land_color", UITheme.BG.lerp(UITheme.ASH, 0.28).lerp(UITheme.TERRACOTTA, 0.05))
 	mat.set_shader_parameter("cliff_color", UITheme.TERRACOTTA)
 	mat.set_shader_parameter("coast_color", UITheme.AMBER)
 	mat.set_shader_parameter("ping_color", UITheme.AMBER)
 	mat.set_shader_parameter("focus", Vector2(1.3, 1.0))
-	mat.set_shader_parameter("hero", HERO_POS)
-	mat.set_shader_parameter("fade_near", 17.0)
-	mat.set_shader_parameter("fade_far", 34.0)
+	mat.set_shader_parameter("hero", _current_hero_pos())
+	mat.set_shader_parameter("fade_near", 34.0)
+	mat.set_shader_parameter("fade_far", 74.0)
 	mat.set_shader_parameter("coast_energy", 2.2)
+	mat.set_shader_parameter("world_width", WORLD_W)
+	_grid_mats.append(mat)
 	return mat
 
 
@@ -505,15 +1259,133 @@ func _add_mesh(mesh: Mesh, mat: Material, node_name: String) -> MeshInstance3D:
 	return mi
 
 
+func _add_wrapped_mesh(mesh: Mesh, mat: Material, node_name: String) -> Node3D:
+	var root := Node3D.new()
+	root.name = node_name
+	add_child(root)
+	for off in WRAP_TILES:
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(float(off) * WORLD_W, 0.0, 0.0)
+		root.add_child(mi)
+	return root
+
+
 func _build_floor() -> void:
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(190.0, 140.0)
-	var mi := _add_mesh(plane, _grid_material(0), "SeaFloor")
-	mi.position = Vector3(2.0, FLOOR_Y, 4.0)
+	plane.size = Vector2(260.0, 200.0)
+	_sea_floor = _add_mesh(plane, _grid_material(0), "SeaFloor")
+	_sea_floor.position = Vector3(0.0, FLOOR_Y, 0.0)
 
 
-## All land polygons merged into one mesh (tops + cliffs) plus one coastline ribbon mesh.
+## Distance from p to any visible (non-seam / non-polar) coastline edge, clamped at max_dist.
+func _dist_to_coast_edges(p: Vector2, poly: PackedVector2Array, max_dist: float) -> float:
+	var best_sq: float = max_dist * max_dist
+	var n: int = poly.size()
+	for i in n:
+		var a: Vector2 = poly[i]
+		var b: Vector2 = poly[(i + 1) % n]
+		if _is_far_edge(a, b):
+			continue
+		if p.x < minf(a.x, b.x) - max_dist or p.x > maxf(a.x, b.x) + max_dist:
+			continue
+		if p.y < minf(a.y, b.y) - max_dist or p.y > maxf(a.y, b.y) + max_dist:
+			continue
+		var c: Vector2 = Geometry2D.get_closest_point_to_segment(p, a, b)
+		var d_sq: float = p.distance_squared_to(c)
+		if d_sq < best_sq:
+			best_sq = d_sq
+	return sqrt(best_sq)
+
+
+func _terrain_ridge_noise(p: Vector2) -> float:
+	var ax: float = p.x * (TAU / WORLD_W)
+	var wx: float = ax + sin(p.y * 0.25 + ax * 3.0) * 0.14
+	var wy: float = p.y + sin(ax * 6.0 - p.y * 0.18) * 1.25
+	var w1: float = sin(wx * 7.0 + wy * 0.34) * cos(wx * 5.0 - wy * 0.29)
+	var w2: float = sin(wx * 15.0 - wy * 0.62) * cos(wx * 11.0 + wy * 0.51)
+	var w3: float = sin(wx * 29.0 + wy * 1.10) * cos(wx * 23.0 - wy * 0.95)
+	var ridge: float = 0.48 * (1.0 - absf(w1)) + 0.34 * (1.0 - absf(w2)) + 0.18 * (0.5 + 0.5 * w3)
+	return clampf(pow(ridge, 1.45) * 1.12, 0.0, 1.0)
+
+
+func _poly_surface_y(p: Vector2, poly: PackedVector2Array) -> float:
+	var dist: float = _dist_to_coast_edges(p, poly, 2.65)
+	if dist <= 0.03:
+		return LAND_Y
+	var t: float = clampf((dist - 0.03) / 2.55, 0.0, 1.0)
+	var cb: float = t * t * (3.0 - 2.0 * t)
+	return LAND_Y + cb * (0.16 + 0.94 * _terrain_ridge_noise(p))
+
+
+func _sample_surface_y(p: Vector2) -> float:
+	var wx: float = wrapf(p.x + HALF_W, 0.0, WORLD_W) - HALF_W
+	var q := Vector2(wx, p.y)
+	for item in _land_polys:
+		var poly: PackedVector2Array = item
+		if Geometry2D.is_point_in_polygon(q, poly):
+			return _poly_surface_y(q, poly)
+	return SEA_Y
+
+
+func _emit_land_vert(st: SurfaceTool, p: Vector2, poly: PackedVector2Array) -> void:
+	var h: float = _poly_surface_y(p, poly)
+	var nrm := Vector3.UP
+	if h > LAND_Y + 0.002:
+		var eps: float = 0.28
+		var hx: float = _poly_surface_y(p + Vector2(eps, 0.0), poly) - _poly_surface_y(p - Vector2(eps, 0.0), poly)
+		var hz: float = _poly_surface_y(p + Vector2(0.0, eps), poly) - _poly_surface_y(p - Vector2(0.0, eps), poly)
+		nrm = Vector3(-hx / (2.0 * eps), 1.0, -hz / (2.0 * eps)).normalized()
+	_vert(st, Vector3(p.x, h, p.y), nrm, Vector2.ZERO, Vector2.ZERO)
+
+
+func _build_land_relief_poly(st: SurfaceTool, poly: PackedVector2Array, lo: Vector2, hi: Vector2, step_sz: float) -> void:
+	var gx0: float = floorf(lo.x / step_sz) * step_sz
+	var gy0: float = floorf(lo.y / step_sz) * step_sz
+	var nx: int = maxi(1, int(ceilf((hi.x - gx0) / step_sz)))
+	var ny: int = maxi(1, int(ceilf((hi.y - gy0) / step_sz)))
+	for ix in nx:
+		var x0: float = gx0 + float(ix) * step_sz
+		var x1: float = x0 + step_sz
+		for iy in ny:
+			var y0: float = gy0 + float(iy) * step_sz
+			var y1: float = y0 + step_sz
+			var center := Vector2((x0 + x1) * 0.5, (y0 + y1) * 0.5)
+			if _dist_to_coast_edges(center, poly, step_sz * 0.8 + 0.05) > step_sz * 0.75:
+				if Geometry2D.is_point_in_polygon(center, poly):
+					var p00 := Vector2(x0, y0)
+					var p10 := Vector2(x1, y0)
+					var p11 := Vector2(x1, y1)
+					var p01 := Vector2(x0, y1)
+					_emit_land_vert(st, p00, poly)
+					_emit_land_vert(st, p10, poly)
+					_emit_land_vert(st, center, poly)
+					_emit_land_vert(st, p10, poly)
+					_emit_land_vert(st, p11, poly)
+					_emit_land_vert(st, center, poly)
+					_emit_land_vert(st, p11, poly)
+					_emit_land_vert(st, p01, poly)
+					_emit_land_vert(st, center, poly)
+					_emit_land_vert(st, p01, poly)
+					_emit_land_vert(st, p00, poly)
+					_emit_land_vert(st, center, poly)
+				continue
+			var box := PackedVector2Array([Vector2(x0, y0), Vector2(x1, y0), Vector2(x1, y1), Vector2(x0, y1)])
+			var pieces: Array = Geometry2D.intersect_polygons(poly, box)
+			for piece in pieces:
+				var spoly: PackedVector2Array = piece
+				if spoly.size() < 3 or absf(_signed_area(spoly)) < 0.0001:
+					continue
+				var tris := _triangulate_points(spoly)
+				for tv in tris:
+					_emit_land_vert(st, tv, poly)
+
+
+## All land polygons merged into one mesh (sculpted terrain tops + cliffs) plus coastline ribbons.
 func _build_land() -> void:
+	_land_polys.clear()
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var coast := SurfaceTool.new()
@@ -526,20 +1398,32 @@ func _build_land() -> void:
 			poly.append(p)
 		if poly.size() < 3:
 			continue
-		var tris := _triangulate_points(poly)
-		for i in tris.size():
-			var t: Vector2 = tris[i]
-			_vert(st, Vector3(t.x, LAND_Y, t.y), Vector3.UP, Vector2(0.0, 0.0), Vector2.ZERO)
+		if _signed_area(poly) < 0.0:
+			poly.reverse()
+		_land_polys.append(poly)
+		var lo: Vector2 = poly[0]
+		var hi: Vector2 = poly[0]
+		for pv in poly:
+			lo = Vector2(minf(lo.x, pv.x), minf(lo.y, pv.y))
+			hi = Vector2(maxf(hi.x, pv.x), maxf(hi.y, pv.y))
+		var ext: Vector2 = hi - lo
+		if ext.x < 1.5 and ext.y < 1.5:
+			var tris := _triangulate_points(poly)
+			for i in tris.size():
+				var t: Vector2 = tris[i]
+				_vert(st, Vector3(t.x, LAND_Y, t.y), Vector3.UP, Vector2(0.0, 0.0), Vector2.ZERO)
+		else:
+			_build_land_relief_poly(st, poly, lo, hi, LAND_RELIEF_STEP)
 		var n: int = poly.size()
 		for i in n:
 			var a: Vector2 = poly[i]
 			var b: Vector2 = poly[(i + 1) % n]
-			if _is_far(a) or _is_far(b):
+			if _is_far_edge(a, b):
 				continue
 			_add_wall(st, a, b, LAND_Y, WALL_BOTTOM_Y, 2.0, 0.0, 0.0, 0.0)
 		_add_coastline(coast, poly)
-	_add_mesh(st.commit(), _grid_material(1), "Land")
-	_add_mesh(coast.commit(), _grid_material(2), "Coastline")
+	_add_wrapped_mesh(st.commit(), _grid_material(1), "Land")
+	_add_wrapped_mesh(coast.commit(), _grid_material(2), "Coastline")
 
 
 ## Region outline as rendered and picked: RegionData's polygon, merged with its entry in
@@ -566,6 +1450,18 @@ func _render_polygon(region_id: String) -> PackedVector2Array:
 
 
 func _build_regions() -> void:
+	var combo_ring_mesh := TorusMesh.new()
+	combo_ring_mesh.inner_radius = 1.65
+	combo_ring_mesh.outer_radius = 1.92
+	combo_ring_mesh.rings = 32
+	combo_ring_mesh.ring_segments = 10
+	var combo_mat := StandardMaterial3D.new()
+	combo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	combo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	combo_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	combo_mat.albedo_color = Color(UITheme.AMBER.r, UITheme.AMBER.g, UITheme.AMBER.b, 0.85)
+	combo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
 	var index: int = 0
 	for rid in RegionData.IDS:
 		var region_id: String = rid
@@ -579,7 +1475,8 @@ func _build_regions() -> void:
 		mat.set_shader_parameter("pulse_color", UITheme.HEALTHY)
 		mat.set_shader_parameter("anchor", RegionData.anchor_of(region_id))
 		mat.set_shader_parameter("seed", float(index) * 17.31)
-		_add_mesh(_build_region_mesh(poly), mat, "Region_" + region_id)
+		mat.set_shader_parameter("world_width", WORLD_W)
+		_add_wrapped_mesh(_build_region_mesh(poly), mat, "Region_" + region_id)
 		var rv := RegionView.new()
 		rv.id = region_id
 		rv.anchor = RegionData.anchor_of(region_id)
@@ -589,7 +1486,7 @@ func _build_regions() -> void:
 		# Selection / hover marquee: dashed ribbon on the region outline, drawn above the land.
 		var ost := SurfaceTool.new()
 		ost.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_add_ribbon(ost, poly, true, 0.1, LAND_Y + 0.03)
+		_add_coastline(ost, poly, 0.1, LAND_Y + 0.03)
 		var omat := ShaderMaterial.new()
 		omat.shader = ROUTE_SHADER
 		omat.set_shader_parameter("kind", 1.0)
@@ -597,9 +1494,21 @@ func _build_regions() -> void:
 		omat.set_shader_parameter("length_units", 1.0)
 		omat.set_shader_parameter("hot_color", UITheme.CRISIS)
 		omat.set_shader_parameter("color", UITheme.AMBER)
-		rv.outline_mi = _add_mesh(ost.commit(), omat, "Outline_" + region_id)
+		rv.outline_mi = _add_wrapped_mesh(ost.commit(), omat, "Outline_" + region_id)
 		rv.outline_mi.visible = false
 		rv.outline_mat = omat
+		var croot := Node3D.new()
+		croot.name = "ComboRing_" + region_id
+		croot.visible = false
+		add_child(croot)
+		for off in WRAP_TILES:
+			var ring_mi := MeshInstance3D.new()
+			ring_mi.mesh = combo_ring_mesh
+			ring_mi.material_override = combo_mat
+			ring_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ring_mi.position = Vector3(rv.anchor.x + float(off) * WORLD_W, LAND_Y + 0.08, rv.anchor.y)
+			croot.add_child(ring_mi)
+		rv.combo_root = croot
 		rv.wave_phase = float(index) * 3.7
 		_views[region_id] = rv
 		index += 1
@@ -616,7 +1525,7 @@ func _build_region_mesh(poly: PackedVector2Array) -> ArrayMesh:
 	var idx: PackedInt32Array = top["indices"]
 	var shore := PackedFloat32Array()
 	for i in pts.size():
-		var d: float = _dist_to_edges(pts[i], poly)
+		var d: float = _dist_to_edges(pts[i], poly, true)
 		shore.append(clampf((d - 0.18) / 1.9, 0.0, 1.0))
 	for k in idx.size():
 		var vi: int = idx[k]
@@ -630,17 +1539,18 @@ func _build_region_mesh(poly: PackedVector2Array) -> ArrayMesh:
 		var j: int = (i + 1) % m
 		var a: Vector2 = dense[i]
 		var b: Vector2 = dense[j]
-		var ai: Vector2 = a + inward[i]
-		var bi: Vector2 = b + inward[j]
 		var next_along: float = along + a.distance_to(b)
-		var y: float = SEA_Y + RIM_LIFT
-		_vert(st, Vector3(a.x, y, a.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, along))
-		_vert(st, Vector3(b.x, y, b.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, next_along))
-		_vert(st, Vector3(bi.x, y, bi.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, next_along))
-		_vert(st, Vector3(a.x, y, a.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, along))
-		_vert(st, Vector3(bi.x, y, bi.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, next_along))
-		_vert(st, Vector3(ai.x, y, ai.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, along))
-		_add_wall(st, a, b, SEA_Y, WALL_BOTTOM_Y, 2.0, 1.0, along, next_along)
+		if not _is_seam_edge(a, b):
+			var ai: Vector2 = a + inward[i]
+			var bi: Vector2 = b + inward[j]
+			var y: float = SEA_Y + RIM_LIFT
+			_vert(st, Vector3(a.x, y, a.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, along))
+			_vert(st, Vector3(b.x, y, b.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, next_along))
+			_vert(st, Vector3(bi.x, y, bi.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, next_along))
+			_vert(st, Vector3(a.x, y, a.y), Vector3.UP, Vector2(1.0, 0.0), Vector2(1.0, along))
+			_vert(st, Vector3(bi.x, y, bi.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, next_along))
+			_vert(st, Vector3(ai.x, y, ai.y), Vector3.UP, Vector2(1.0, 1.0), Vector2(1.0, along))
+			_add_wall(st, a, b, SEA_Y, WALL_BOTTOM_Y, 2.0, 1.0, along, next_along)
 		along = next_along
 	return st.commit()
 
@@ -653,27 +1563,31 @@ func _build_routes() -> void:
 		var kind: String = route["kind"]
 		var a: Vector2 = RegionData.anchor_of(a_id)
 		var b: Vector2 = RegionData.anchor_of(b_id)
-		var dir: Vector2 = (b - a).normalized()
-		var start: Vector2 = a + dir * ROUTE_END_GAP
-		var finish: Vector2 = b - dir * ROUTE_END_GAP
-		var span: float = start.distance_to(finish)
+		var dx: float = b.x - a.x
+		if dx > HALF_W:
+			b.x -= WORLD_W
+		elif dx < -HALF_W:
+			b.x += WORLD_W
 		var shipping: bool = kind == "shipping"
-		var lift: float = clampf(span * 0.2, 0.9, 2.8)
-		var radius: float = 0.12
-		if shipping:
-			lift *= 0.6
-			radius = 0.075
-		var p0 := Vector3(start.x, 0.12, start.y)
-		var p2 := Vector3(finish.x, 0.12, finish.y)
-		var p1: Vector3 = (p0 + p2) * 0.5 + Vector3(0.0, lift * 2.0, 0.0)
-		var length: float = _bezier_length(p0, p1, p2, 48)
+		var radius: float = 0.075 if shipping else 0.11
 		var mat := ShaderMaterial.new()
 		mat.shader = ROUTE_SHADER
 		mat.set_shader_parameter("hot_color", UITheme.CRISIS)
 		mat.set_shader_parameter("kind", 1.0 if shipping else 0.0)
-		mat.set_shader_parameter("length_units", length)
 		mat.set_shader_parameter("intensity", 1.0)
-		_add_mesh(_tube_mesh(p0, p1, p2, radius, 24, 5), mat, "Route_%s_%s" % [a_id, b_id])
+		var dir: Vector2 = (b - a).normalized()
+		var start: Vector2 = a + dir * ROUTE_END_GAP
+		var finish: Vector2 = b - dir * ROUTE_END_GAP
+		var span: float = start.distance_to(finish)
+		var lift: float = clampf(span * 0.24, 1.45, 4.2)
+		if shipping:
+			lift *= 0.72
+		var p0 := Vector3(start.x, 0.20, start.y)
+		var p2 := Vector3(finish.x, 0.20, finish.y)
+		var p1: Vector3 = (p0 + p2) * 0.5 + Vector3(0.0, lift * 2.0, 0.0)
+		var length: float = _bezier_length(p0, p1, p2, 48)
+		mat.set_shader_parameter("length_units", length)
+		_add_wrapped_mesh(_tube_mesh(p0, p1, p2, radius, 24, 5), mat, "Route_%s_%s" % [a_id, b_id])
 		var rt := RouteView.new()
 		rt.a = a_id
 		rt.b = b_id
@@ -688,39 +1602,61 @@ func _build_hero() -> void:
 	shader.code = BEACON_SHADER_CODE
 
 	var beam := CylinderMesh.new()
-	beam.top_radius = 0.06
-	beam.bottom_radius = 0.09
+	beam.top_radius = 0.07
+	beam.bottom_radius = 0.11
 	beam.height = 4.6
 	beam.radial_segments = 16
 	beam.rings = 1
-	var beam_mat := _beacon_material(shader, 0, 5.0, beam.height * 0.5)
-	var beam_mi := _add_mesh(beam, beam_mat, "HeroBeam")
-	beam_mi.position = Vector3(HERO_POS.x, LAND_Y + beam.height * 0.5, HERO_POS.y)
+	var beam_mat := _beacon_material(shader, 0, 5.2, beam.height * 0.5)
 
 	var halo := CylinderMesh.new()
-	halo.top_radius = 0.3
-	halo.bottom_radius = 0.42
+	halo.top_radius = 0.35
+	halo.bottom_radius = 0.48
 	halo.height = 3.2
 	halo.radial_segments = 20
 	halo.rings = 1
-	var halo_mi := _add_mesh(halo, _beacon_material(shader, 0, 0.45, halo.height * 0.5), "HeroHalo")
-	halo_mi.position = Vector3(HERO_POS.x, LAND_Y + halo.height * 0.5, HERO_POS.y)
+	var halo_mat := _beacon_material(shader, 0, 0.48, halo.height * 0.5)
 
 	var ring := PlaneMesh.new()
-	ring.size = Vector2(4.4, 4.4)
-	var ring_mi := _add_mesh(ring, _beacon_material(shader, 1, 1.6, 1.0), "HeroRing")
-	ring_mi.position = Vector3(HERO_POS.x, LAND_Y + 0.03, HERO_POS.y)
+	ring.size = Vector2(4.8, 4.8)
+	var ring_mat := _beacon_material(shader, 1, 1.7, 1.0)
+
+	_hero_root = Node3D.new()
+	_hero_root.name = "HeroRoot"
+	add_child(_hero_root)
+	for off in WRAP_TILES:
+		var ox: float = float(off) * WORLD_W
+		var b_mi := MeshInstance3D.new()
+		b_mi.mesh = beam
+		b_mi.material_override = beam_mat
+		b_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		b_mi.position = Vector3(ox, beam.height * 0.5, 0.0)
+		_hero_root.add_child(b_mi)
+
+		var h_mi := MeshInstance3D.new()
+		h_mi.mesh = halo
+		h_mi.material_override = halo_mat
+		h_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		h_mi.position = Vector3(ox, halo.height * 0.5, 0.0)
+		_hero_root.add_child(h_mi)
+
+		var r_mi := MeshInstance3D.new()
+		r_mi.mesh = ring
+		r_mi.material_override = ring_mat
+		r_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		r_mi.position = Vector3(ox, 0.03, 0.0)
+		_hero_root.add_child(r_mi)
 
 	_build_city_lights(shader)
 
 	_hero_label = _make_label(NAME_FONT_SIZE, UITheme.AMBER)
 	_hero_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	_hero_label.position = Vector3(HERO_POS.x + 0.9, LAND_Y + beam.height + 0.2, HERO_POS.y)
 	_hero_label.text = I18n.t("map.hero_label")
 	add_child(_hero_label)
+	_update_hero_position()
 
 
-## All city lights in one mesh of flat soft-dot quads on the land (one draw call).
+## All city lights in one mesh of flat soft-dot quads seated on terrain surfaces (one draw call).
 func _build_city_lights(shader: Shader) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -736,7 +1672,7 @@ func _build_city_lights(shader: Shader) -> void:
 			half = 0.42
 			bright = 1.0
 		var seed_v: float = fposmod(float(index) * 0.618, 1.0)
-		var y: float = LAND_Y + 0.02
+		var y: float = maxf(LAND_Y, _sample_surface_y(Vector2(city.x, city.y))) + 0.03
 		var c0 := Vector3(city.x - half, y, city.y - half)
 		var c1 := Vector3(city.x + half, y, city.y - half)
 		var c2 := Vector3(city.x + half, y, city.y + half)
@@ -751,7 +1687,7 @@ func _build_city_lights(shader: Shader) -> void:
 		index += 1
 	var mat := _beacon_material(shader, 2, 1.6, 1.0)
 	mat.set_shader_parameter("color", UITheme.AMBER.lerp(UITheme.TEXT, 0.4))
-	_add_mesh(st.commit(), mat, "CityLights")
+	_add_wrapped_mesh(st.commit(), mat, "CityLights")
 
 
 func _beacon_material(shader: Shader, mode: int, energy: float, half_height: float) -> ShaderMaterial:
@@ -762,6 +1698,72 @@ func _beacon_material(shader: Shader, mode: int, energy: float, half_height: flo
 	mat.set_shader_parameter("energy", energy)
 	mat.set_shader_parameter("half_height", half_height)
 	return mat
+
+
+func _build_fleet() -> void:
+	_fleet_root = Node3D.new()
+	_fleet_root.name = "EmergencyFleet"
+	_fleet_root.visible = false
+	add_child(_fleet_root)
+
+	var hull_mat := StandardMaterial3D.new()
+	hull_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hull_mat.albedo_color = UITheme.AMBER.lerp(Color.WHITE, 0.45)
+
+	var wake_mat := StandardMaterial3D.new()
+	wake_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	wake_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	wake_mat.albedo_color = UITheme.with_alpha(UITheme.HEALTHY, 0.72)
+
+	var beacon_mat := StandardMaterial3D.new()
+	beacon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beacon_mat.albedo_color = UITheme.HEALTHY * 1.4
+
+	var hull_mesh := BoxMesh.new()
+	hull_mesh.size = Vector3(0.32, 0.16, 0.68)
+	var bow_mesh := CylinderMesh.new()
+	bow_mesh.top_radius = 0.0
+	bow_mesh.bottom_radius = 0.18
+	bow_mesh.height = 0.38
+	var bridge_mesh := BoxMesh.new()
+	bridge_mesh.size = Vector3(0.22, 0.18, 0.30)
+	var beacon_mesh := SphereMesh.new()
+	beacon_mesh.radius = 0.14
+	beacon_mesh.height = 0.28
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 0.38
+	ring_mesh.outer_radius = 0.50
+
+	for off in WRAP_TILES:
+		var ship := Node3D.new()
+		ship.set_meta("wrap_off", float(off) * WORLD_W)
+		var hull := MeshInstance3D.new()
+		hull.mesh = hull_mesh
+		hull.material_override = hull_mat
+		ship.add_child(hull)
+		var bow := MeshInstance3D.new()
+		bow.mesh = bow_mesh
+		bow.material_override = hull_mat
+		bow.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+		bow.position = Vector3(0.0, 0.0, -0.50)
+		ship.add_child(bow)
+		var bridge := MeshInstance3D.new()
+		bridge.mesh = bridge_mesh
+		bridge.material_override = hull_mat
+		bridge.position = Vector3(0.0, 0.15, 0.08)
+		ship.add_child(bridge)
+		var beacon := MeshInstance3D.new()
+		beacon.mesh = beacon_mesh
+		beacon.material_override = beacon_mat
+		beacon.position = Vector3(0.0, 0.36, 0.08)
+		ship.add_child(beacon)
+		var ring := MeshInstance3D.new()
+		ring.mesh = ring_mesh
+		ring.material_override = wake_mat
+		ring.position = Vector3(0.0, -0.05, 0.0)
+		ship.add_child(ring)
+		_fleet_root.add_child(ship)
+		_fleet_nodes.append(ship)
 
 
 func _build_labels() -> void:
@@ -844,6 +1846,10 @@ func _connect_bus() -> void:
 	EventBus.language_changed.connect(_on_language_changed)
 	EventBus.game_started.connect(_on_game_started)
 	EventBus.game_over.connect(_on_game_over)
+	EventBus.map_layer_changed.connect(_on_map_layer_changed)
+	EventBus.fleet_dispatched.connect(_on_fleet_dispatched)
+	EventBus.fleet_arrived.connect(_on_fleet_arrived)
+	EventBus.combo_triggered.connect(_on_combo_triggered)
 
 
 # =====================================================================================
@@ -874,8 +1880,20 @@ func _add_wall(st: SurfaceTool, a: Vector2, b: Vector2, top_y: float, bottom_y: 
 	_vert(st, ab, nrm, Vector2(part, 1.0), Vector2(0.0, along_a))
 
 
-func _is_far(p: Vector2) -> bool:
-	return absf(p.x) > FAR_X or absf(p.y) > FAR_Y
+func _nearest_wrap_x(base_x: float) -> float:
+	var dx: float = base_x - _cam_target.x
+	return _cam_target.x + (fposmod(dx + HALF_W, WORLD_W) - HALF_W)
+
+
+func _is_seam_edge(a: Vector2, b: Vector2) -> bool:
+	if absf(a.x - b.x) > 0.02:
+		return false
+	var mid_x: float = (a.x + b.x) * 0.5
+	return absf(mid_x + HALF_W) < SEAM_EPS or absf(mid_x - HALF_W) < SEAM_EPS
+
+
+func _is_far_edge(a: Vector2, b: Vector2) -> bool:
+	return absf(a.y) > FAR_Y or absf(b.y) > FAR_Y or _is_seam_edge(a, b)
 
 
 func _signed_area(poly: PackedVector2Array) -> float:
@@ -900,13 +1918,17 @@ func _densify(poly: PackedVector2Array, step: float) -> PackedVector2Array:
 	return out
 
 
-func _dist_to_edges(p: Vector2, poly: PackedVector2Array) -> float:
+func _dist_to_edges(p: Vector2, poly: PackedVector2Array, ignore_seam: bool = false) -> float:
 	var best: float = INF
 	var n: int = poly.size()
 	for i in n:
-		var c: Vector2 = Geometry2D.get_closest_point_to_segment(p, poly[i], poly[(i + 1) % n])
+		var a: Vector2 = poly[i]
+		var b: Vector2 = poly[(i + 1) % n]
+		if ignore_seam and _is_seam_edge(a, b):
+			continue
+		var c: Vector2 = Geometry2D.get_closest_point_to_segment(p, a, b)
 		best = minf(best, p.distance_squared_to(c))
-	return sqrt(best)
+	return sqrt(best) if best < INF else 10.0
 
 
 ## Triangles as a flat point list (3 points each). Ear clipping first; README crash rule 1
@@ -979,18 +2001,17 @@ func _inward_offsets(dense: PackedVector2Array, width: float, ccw: bool) -> Pack
 
 
 ## Splits the outline into runs of on-map edges and lays a glowing ribbon along each run.
-func _add_coastline(st: SurfaceTool, poly: PackedVector2Array) -> void:
+func _add_coastline(st: SurfaceTool, poly: PackedVector2Array, width: float = COAST_WIDTH, y: float = LAND_Y + 0.01) -> void:
 	var n: int = poly.size()
 	var coast_edge: Array = []
 	var start: int = -1
 	for i in n:
-		var on_map: bool = not (_is_far(poly[i]) or _is_far(poly[(i + 1) % n]))
+		var on_map: bool = not _is_far_edge(poly[i], poly[(i + 1) % n])
 		coast_edge.append(on_map)
 		if not on_map and start < 0:
 			start = i
-	var y: float = LAND_Y + 0.01
 	if start < 0:
-		_add_ribbon(st, poly, true, COAST_WIDTH, y)
+		_add_ribbon(st, poly, true, width, y)
 		return
 	var run := PackedVector2Array()
 	for k in range(1, n + 1):
@@ -1002,10 +2023,10 @@ func _add_coastline(st: SurfaceTool, poly: PackedVector2Array) -> void:
 			run.append(poly[(i + 1) % n])
 		else:
 			if run.size() >= 2:
-				_add_ribbon(st, run, false, COAST_WIDTH, y)
+				_add_ribbon(st, run, false, width, y)
 			run = PackedVector2Array()
 	if run.size() >= 2:
-		_add_ribbon(st, run, false, COAST_WIDTH, y)
+		_add_ribbon(st, run, false, width, y)
 
 
 ## Flat mitred ribbon centred on a polyline. UV.x = distance along, UV.y = 0..1 across.
@@ -1081,6 +2102,67 @@ func _bezier_length(p0: Vector3, p1: Vector3, p2: Vector3, segments: int) -> flo
 
 
 ## Tube along a quadratic Bézier. UV.x = 0..1 along, UV.y = 0..1 around.
+
+
+func _current_hero_pos() -> Vector2:
+	var hq: String = GameState.hq_region if RegionData.DEFS.has(GameState.hq_region) else RegionData.HERO_ID
+	return RegionData.anchor_of(hq) + Vector2(1.45, -0.75)
+
+
+func _update_hero_position() -> void:
+	var hp: Vector2 = _current_hero_pos()
+	var hy: float = maxf(SEA_Y + 0.04, _sample_surface_y(hp))
+	if _hero_root != null:
+		_hero_root.position = Vector3(hp.x, hy, hp.y)
+	if _hero_label != null:
+		_hero_label.position = Vector3(_nearest_wrap_x(hp.x), hy + 4.8, hp.y - 0.3)
+	for gm in _grid_mats:
+		var m: ShaderMaterial = gm
+		if m != null:
+			m.set_shader_parameter("hero", hp)
+
+
+func _wrap_tube_mesh(pa0: Vector3, pa1: Vector3, pa2: Vector3, pb0: Vector3, pb1: Vector3, pb2: Vector3, radius: float, seg_len: int, seg_rad: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for half_idx in 2:
+		var p0: Vector3 = pa0 if half_idx == 0 else pb0
+		var p1: Vector3 = pa1 if half_idx == 0 else pb1
+		var p2: Vector3 = pa2 if half_idx == 0 else pb2
+		var u_base: float = 0.0 if half_idx == 0 else 0.5
+		var centers := PackedVector3Array()
+		for i in seg_len + 1:
+			centers.append(_bezier(p0, p1, p2, float(i) / float(seg_len)))
+		var ring_pos := PackedVector3Array()
+		var ring_nrm := PackedVector3Array()
+		for i in seg_len + 1:
+			var tangent: Vector3 = (centers[mini(i + 1, seg_len)] - centers[maxi(i - 1, 0)]).normalized()
+			var side: Vector3 = tangent.cross(Vector3.UP).normalized()
+			var up: Vector3 = side.cross(tangent).normalized()
+			for k in seg_rad + 1:
+				var ang: float = TAU * float(k) / float(seg_rad)
+				var radial: Vector3 = side * cos(ang) + up * sin(ang)
+				ring_pos.append(centers[i] + radial * radius)
+				ring_nrm.append(radial)
+		var stride: int = seg_rad + 1
+		for i in seg_len:
+			for k in seg_rad:
+				var i00: int = i * stride + k
+				var i01: int = i * stride + k + 1
+				var i10: int = (i + 1) * stride + k
+				var i11: int = (i + 1) * stride + k + 1
+				var u0: float = u_base + (float(i) / float(seg_len)) * 0.5
+				var u1: float = u_base + (float(i + 1) / float(seg_len)) * 0.5
+				var v0: float = float(k) / float(seg_rad)
+				var v1: float = float(k + 1) / float(seg_rad)
+				_vert(st, ring_pos[i00], ring_nrm[i00], Vector2(u0, v0), Vector2.ZERO)
+				_vert(st, ring_pos[i10], ring_nrm[i10], Vector2(u1, v0), Vector2.ZERO)
+				_vert(st, ring_pos[i11], ring_nrm[i11], Vector2(u1, v1), Vector2.ZERO)
+				_vert(st, ring_pos[i00], ring_nrm[i00], Vector2(u0, v0), Vector2.ZERO)
+				_vert(st, ring_pos[i11], ring_nrm[i11], Vector2(u1, v1), Vector2.ZERO)
+				_vert(st, ring_pos[i01], ring_nrm[i01], Vector2(u0, v1), Vector2.ZERO)
+	return st.commit()
+
 func _tube_mesh(p0: Vector3, p1: Vector3, p2: Vector3, radius: float, seg_len: int, seg_rad: int) -> ArrayMesh:
 	var centers := PackedVector3Array()
 	for i in seg_len + 1:
@@ -1130,6 +2212,7 @@ func _process(delta: float) -> void:
 	_update_pending_flashes(delta)
 	_update_regions(delta)
 	_update_routes(delta)
+	_update_fleet()
 	_update_living_map(delta)
 	_update_labels(delta)
 	_update_camera(delta)
@@ -1141,12 +2224,29 @@ func _update_regions(delta: float) -> void:
 	if delta <= 0.0:
 		k = 1.0
 		kh = 1.0
+	var risk_map: Dictionary = {}
+	for rid in _views:
+		var rvv: RegionView = _views[rid]
+		risk_map[rid] = clampf((rvv.crisis - Balance.SPREAD_THRESHOLD + 6.0) / 30.0, 0.0, 1.0)
+	for item in _routes:
+		var rt: RouteView = item
+		var ra: RegionView = _views[rt.a]
+		var rb: RegionView = _views[rt.b]
+		var hi: float = maxf(ra.crisis, rb.crisis)
+		if hi >= Balance.SPREAD_THRESHOLD - 4.0:
+			var low_prot: float = rb.protection if ra.crisis >= rb.crisis else ra.protection
+			var shield: float = 1.0 - clampf(low_prot / 100.0 * Balance.SPREAD_PROTECTION_SHIELD, 0.0, 1.0)
+			var rval: float = clampf((hi - Balance.SPREAD_THRESHOLD + 6.0) / 26.0, 0.0, 1.0) * shield
+			var dst_id: String = rt.b if ra.crisis >= rb.crisis else rt.a
+			risk_map[dst_id] = maxf(float(risk_map.get(dst_id, 0.0)), rval)
 	for rid in _views:
 		var rv: RegionView = _views[rid]
 		rv.health = lerpf(rv.health, rv.health_goal, k)
 		rv.pollution = lerpf(rv.pollution, rv.pollution_goal, k)
 		rv.coral = lerpf(rv.coral, rv.coral_goal, k)
 		rv.grass = lerpf(rv.grass, rv.grass_goal, k)
+		rv.bio = lerpf(rv.bio, rv.bio_goal, k)
+		rv.spread_risk = lerpf(rv.spread_risk, float(risk_map.get(rid, 0.0)), k)
 		rv.crisis = lerpf(rv.crisis, rv.crisis_goal, k)
 		rv.protection = lerpf(rv.protection, rv.protection_goal, k)
 		var hover_goal: float = 1.0 if rv.id == _hovered else 0.0
@@ -1163,6 +2263,11 @@ func _update_regions(delta: float) -> void:
 		mat.set_shader_parameter("pollution", rv.pollution)
 		mat.set_shader_parameter("coral", rv.coral)
 		mat.set_shader_parameter("seagrass", rv.grass)
+		mat.set_shader_parameter("layer_mode", _map_layer)
+		mat.set_shader_parameter("protection", clampf(rv.protection / 100.0, 0.0, 1.0))
+		mat.set_shader_parameter("spread_risk", rv.spread_risk)
+		mat.set_shader_parameter("biodiversity", rv.bio)
+		mat.set_shader_parameter("blue_carbon", 1.0 if rv.grass * 100.0 >= Balance.BLUE_CARBON_SEAGRASS else 0.0)
 		mat.set_shader_parameter("highlight", rv.highlight)
 		mat.set_shader_parameter("selected", rv.selected)
 		mat.set_shader_parameter("flash", rv.flash)
@@ -1174,6 +2279,13 @@ func _update_regions(delta: float) -> void:
 			rv.outline_mat.set_shader_parameter("intensity", mark * 2.4)
 			rv.outline_mat.set_shader_parameter("color", UITheme.TEXT.lerp(UITheme.AMBER, rv.selected))
 			rv.outline_mat.set_shader_parameter("phase", fposmod(_time * 0.35, 100.0))
+		if rv.combo_root != null:
+			rv.combo_root.visible = rv.combo_active and not _menu_mode
+			if rv.combo_root.visible:
+				var pulse_s: float = 1.0 + 0.08 * sin(_time * 3.8 + rv.wave_phase)
+				for ch in rv.combo_root.get_children():
+					var ring_mi: MeshInstance3D = ch
+					ring_mi.scale = Vector3(pulse_s, 1.0, pulse_s)
 
 
 func _update_routes(delta: float) -> void:
@@ -1211,6 +2323,7 @@ func _update_routes(delta: float) -> void:
 		mat.set_shader_parameter("flash", rt.flash)
 		mat.set_shader_parameter("burst", rt.burst)
 		mat.set_shader_parameter("burst_dir", rt.burst_dir)
+		mat.set_shader_parameter("layer_mode", _map_layer)
 
 
 func _update_pending_flashes(delta: float) -> void:
@@ -1235,27 +2348,66 @@ func _update_labels(delta: float) -> void:
 		_label_alpha = move_toward(_label_alpha, goal, delta * 1.8)
 	var vis: bool = _label_alpha > 0.01
 	var outline := Color(UITheme.BG.r, UITheme.BG.g, UITheme.BG.b, 0.88 * _label_alpha)
+	var zoom_ratio: float = clampf(_cam_dist / maxf(GAME_DIST, 1.0), 0.45, 1.35)
+	var lod_pixel: float = LABEL_PIXEL * clampf(pow(zoom_ratio, 0.62), 0.65, 1.05)
+	var show_secondary_lod: bool = zoom_ratio <= 1.08
+	var placed_rects: Array = []
+
+	# Prioritize selected, hovered, and HQ regions first for screen-space non-overlap
+	var ordered_ids: Array = []
 	for rid in _views:
+		if rid == _selected or rid == _hovered or rid == GameState.hq_region:
+			ordered_ids.push_front(rid)
+		else:
+			ordered_ids.append(rid)
+
+	for rid in ordered_ids:
 		var rv: RegionView = _views[rid]
 		if rv.name_label == null or rv.status_label == null:
 			continue
-		rv.name_label.visible = vis
-		rv.status_label.visible = vis
 		if not vis:
+			rv.name_label.visible = false
+			rv.status_label.visible = false
 			continue
-		# Selected names go bright white (the amber marquee and rim already mark selection;
-		# amber text would sink into the amber hero beacon and marquee).
+		var off: Vector2 = LABEL_OFFSET.get(rid, Vector2.ZERO)
+		var lx: float = _nearest_wrap_x(rv.anchor.x + off.x)
+		var ly: float = rv.anchor.y + off.y
+		rv.name_label.position = Vector3(lx, LABEL_LIFT, ly)
+		rv.status_label.position = Vector3(lx, LABEL_LIFT, ly)
+		rv.name_label.pixel_size = lod_pixel
+		rv.status_label.pixel_size = lod_pixel * 0.92
+		var is_priority: bool = (rid == _selected or rid == _hovered)
+		var overlaps: bool = false
+		if camera != null and camera.is_inside_tree() and not is_priority:
+			var sp: Vector2 = camera.unproject_position(rv.name_label.global_position)
+			var box := Rect2(sp - Vector2(68.0, 22.0), Vector2(136.0, 44.0))
+			for pr in placed_rects:
+				if box.intersects(pr):
+					overlaps = true
+					break
+			if not overlaps:
+				placed_rects.append(box)
+		elif camera != null and camera.is_inside_tree():
+			var sp_p: Vector2 = camera.unproject_position(rv.name_label.global_position)
+			placed_rects.append(Rect2(sp_p - Vector2(72.0, 24.0), Vector2(144.0, 48.0)))
+
+		rv.name_label.visible = not overlaps
+		var show_stat: bool = (not overlaps) and (show_secondary_lod or is_priority or rv.status == "critical" or rv.status == "collapsed")
+		rv.status_label.visible = show_stat
 		var c: Color = UITheme.TEXT.lerp(Color(1.0, 1.0, 1.0), maxf(rv.highlight, rv.selected))
 		c.a = _label_alpha
 		rv.name_label.modulate = c
 		rv.name_label.outline_modulate = outline
-		var sc: Color = _status_color(rv.status)
+		var sc: Color = UITheme.AMBER.lerp(Color.WHITE, 0.2) if rv.combo_active else _status_color(rv.status)
 		sc.a = _label_alpha
 		rv.status_label.modulate = sc
 		rv.status_label.outline_modulate = outline
 
 	# The hero label fades out behind the end screen (it would poke out of the end panel).
 	if _hero_label != null:
+		var hp: Vector2 = _current_hero_pos()
+		var hy: float = maxf(SEA_Y + 0.04, _sample_surface_y(hp))
+		_hero_label.position = Vector3(_nearest_wrap_x(hp.x), hy + 4.8, hp.y - 0.3)
 		var hg: float = 0.0 if (_menu_mode and _end_open) else 1.0
 		if delta > 0.0:
 			_hero_alpha = move_toward(_hero_alpha, hg, delta * 1.8)
@@ -1271,9 +2423,26 @@ func _update_labels(delta: float) -> void:
 func _update_camera(delta: float) -> void:
 	if camera == null or not camera.is_inside_tree():
 		return
+	if _has_pan_goal and not _menu_mode and delta > 0.0:
+		var k_pan: float = 1.0 - exp(-delta * 5.2)
+		_user_pan.x = lerpf(_user_pan.x, _pan_goal.x, k_pan)
+		_user_pan.z = lerpf(_user_pan.z, _pan_goal.y, k_pan)
+		if absf(_user_pan.x - _pan_goal.x) + absf(_user_pan.z - _pan_goal.y) < 0.12:
+			_has_pan_goal = false
+	while _user_pan.x > HALF_W:
+		_user_pan.x -= WORLD_W
+		_cam_target.x -= WORLD_W
+		_pan_goal.x -= WORLD_W
+		_pan_before_select.x -= WORLD_W
+	while _user_pan.x < -HALF_W:
+		_user_pan.x += WORLD_W
+		_cam_target.x += WORLD_W
+		_pan_goal.x += WORLD_W
+		_pan_before_select.x += WORLD_W
+
 	var goal_target: Vector3 = MENU_TARGET if _menu_mode else (GAME_TARGET + _user_pan)
 	var goal_dist: float = MENU_DIST if _menu_mode else (GAME_DIST * _user_zoom)
-	var goal_pitch: float = MENU_PITCH if _menu_mode else lerpf(48.0, GAME_PITCH, clampf((_user_zoom - 0.55) / 0.45, 0.0, 1.0))
+	var goal_pitch: float = MENU_PITCH if _menu_mode else (lerpf(33.0, GAME_PITCH, clampf((_user_zoom - 0.45) / 0.55, 0.0, 1.0)) if _user_zoom <= 1.0 else lerpf(GAME_PITCH, 50.0, clampf((_user_zoom - 1.0) / 0.45, 0.0, 1.0)))
 	if _snap_camera or delta <= 0.0:
 		_cam_target = goal_target
 		_cam_dist = goal_dist
@@ -1284,6 +2453,13 @@ func _update_camera(delta: float) -> void:
 		_cam_target = _cam_target.lerp(goal_target, k)
 		_cam_dist = lerpf(_cam_dist, goal_dist, k)
 		_cam_pitch = lerpf(_cam_pitch, goal_pitch, k)
+
+	if _sea_floor != null:
+		_sea_floor.position.x = _cam_target.x
+	for gm in _grid_mats:
+		var m: ShaderMaterial = gm
+		if m != null:
+			m.set_shader_parameter("focus", Vector2(_cam_target.x, _cam_target.z))
 
 	var t: float = _time
 	var drift := Vector3.ZERO
@@ -1372,35 +2548,39 @@ func _unhandled_input(event: InputEvent) -> void:
 				var old_d: float = prev_pos.distance_to(other_pos)
 				var new_d: float = drag.position.distance_to(other_pos)
 				if old_d > 12.0 and new_d > 12.0:
-					_user_zoom = clampf(_user_zoom * (old_d / new_d), 0.55, 1.18)
+					_user_zoom = clampf(_user_zoom * (old_d / new_d), 0.45, 1.45)
 				_touch_dragged = true
 			elif _touches.size() == 1:
 				if drag.position.distance_to(_touch_start) > 16.0:
 					_touch_dragged = true
 				if _touch_dragged:
+					_has_pan_goal = false
+					_did_select_pan = false
 					var pan_scale: float = 0.022 * _user_zoom
-					_user_pan.x = clampf(_user_pan.x - drag.relative.x * pan_scale, -10.5, 10.5)
-					_user_pan.z = clampf(_user_pan.z - drag.relative.y * pan_scale, -6.0, 6.0)
+					_user_pan.x -= drag.relative.x * pan_scale
+					_user_pan.z = clampf(_user_pan.z - drag.relative.y * pan_scale, -15.5, 15.5)
 			_touches[drag.index] = drag.position
 			get_viewport().set_input_as_handled()
 		return
 
 	var motion := event as InputEventMouseMotion
 	if motion != null:
+		if motion.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		_motion_reached_map = true
 		_mouse_pos = motion.position
 		return
 	var button := event as InputEventMouseButton
-	if button == null or not button.pressed:
+	if button == null or not button.pressed or button.device == InputEvent.DEVICE_ID_EMULATION:
 		return
 	if _menu_mode or GameState.menu_paused or not GameState.running:
 		return
 	if button.button_index == MOUSE_BUTTON_WHEEL_UP:
-		_user_zoom = clampf(_user_zoom * 0.92, 0.55, 1.18)
+		_user_zoom = clampf(_user_zoom * 0.92, 0.45, 1.45)
 		get_viewport().set_input_as_handled()
 		return
 	elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		_user_zoom = clampf(_user_zoom * 1.08, 0.55, 1.18)
+		_user_zoom = clampf(_user_zoom * 1.08, 0.45, 1.45)
 		get_viewport().set_input_as_handled()
 		return
 	elif button.button_index == MOUSE_BUTTON_LEFT:
@@ -1416,8 +2596,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_MOUSE_EXIT:
+	if what == NOTIFICATION_WM_MOUSE_EXIT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		_mouse_on_map = false
+		_motion_pending = false
+		_touches.clear()
+		_touch_dragged = false
 
 
 func _update_hover() -> void:
@@ -1440,7 +2623,7 @@ func _set_hover(region_id: String) -> void:
 
 ## Region id under a screen position, "" for land, empty sea or a ray that misses the plane.
 ## Region labels are drawn on top of everything, so a click on a label picks its region
-## (tiny regions such as Marmara are mostly covered by their own label).
+## (smaller straits are mostly covered by their own label).
 func _pick(screen_pos: Vector2) -> String:
 	if camera == null or not camera.is_inside_tree():
 		return ""
@@ -1458,10 +2641,12 @@ func _pick(screen_pos: Vector2) -> String:
 	if found != "":
 		return found
 	# Render-only extensions (REGION_EXTENSIONS) pick like the rest of their region.
-	for rid in _views:
-		var rv: RegionView = _views[rid]
-		if rv.extended and Geometry2D.is_point_in_polygon(point, rv.poly):
-			return rv.id
+	for off in WRAP_TILES:
+		var wp := Vector2(point.x + float(off) * WORLD_W, point.y)
+		for rid in _views:
+			var rv: RegionView = _views[rid]
+			if rv.extended and Geometry2D.is_point_in_polygon(wp, rv.poly):
+				return rv.id
 	return ""
 
 
@@ -1517,17 +2702,24 @@ func _apply_region_data(region_id: String, data: Dictionary, snap: bool) -> void
 	rv.pollution_goal = clampf(float(data.get("pollution", 50.0)) / 100.0, 0.0, 1.0)
 	rv.coral_goal = clampf(float(data.get("coral_health", 50.0)) / 100.0, 0.0, 1.0)
 	rv.grass_goal = clampf(float(data.get("seagrass", 50.0)) / 100.0, 0.0, 1.0)
+	var fish: float = clampf(float(data.get("fish_stock", 50.0)) / 100.0, 0.0, 1.0)
+	rv.bio_goal = clampf(rv.coral_goal * 0.35 + rv.grass_goal * 0.35 + fish * 0.30, 0.0, 1.0)
 	rv.crisis_goal = clampf(float(data.get("crisis", 50.0)), 0.0, 100.0)
 	rv.protection_goal = clampf(float(data.get("protection", 0.0)), 0.0, 100.0)
+	var prev_combo: bool = rv.combo_active
+	rv.combo_active = bool(data.get("combo_active", false))
+	var prev_crit: bool = rv.crisis >= Balance.REGION_CRITICAL_CRISIS
 	if snap:
 		rv.health = rv.health_goal
 		rv.pollution = rv.pollution_goal
 		rv.coral = rv.coral_goal
 		rv.grass = rv.grass_goal
+		rv.bio = rv.bio_goal
 		rv.crisis = rv.crisis_goal
 		rv.protection = rv.protection_goal
 	var status: String = str(data.get("status", "stressed"))
-	if status != rv.status:
+	var next_crit: bool = rv.crisis_goal >= Balance.REGION_CRITICAL_CRISIS
+	if status != rv.status or rv.combo_active != prev_combo or next_crit != prev_crit:
 		rv.status = status
 		_refresh_status_label(rv)
 
@@ -1535,8 +2727,14 @@ func _apply_region_data(region_id: String, data: Dictionary, snap: bool) -> void
 func _refresh_status_label(rv: RegionView) -> void:
 	if rv.status_label == null or rv.status == "":
 		return
-	rv.status_label.text = I18n.t("hud.status." + rv.status)
-	_measure_labels(rv)
+	var txt: String = I18n.t("hud.status." + rv.status)
+	if rv.combo_active:
+		txt += " " + I18n.t("map.badge.shield")
+	elif rv.crisis_goal >= Balance.REGION_CRITICAL_CRISIS:
+		txt = I18n.t("map.badge.alert") + " " + txt
+	if rv.status_label.text != txt:
+		rv.status_label.text = txt
+		_measure_labels(rv)
 
 
 func _status_color(status: String) -> Color:
@@ -1567,6 +2765,81 @@ func _on_region_changed(region_id: String, data: Dictionary) -> void:
 	_apply_region_data(region_id, data, false)
 
 
+func _on_map_layer_changed(layer: int) -> void:
+	_map_layer = clampi(layer, 0, 2)
+	if _built:
+		_update_regions(0.0)
+		_update_routes(0.0)
+
+
+func _on_fleet_dispatched(from_id: String, _to_id: String, _path: Array, _eta: int) -> void:
+	if _views.has(from_id):
+		var rv: RegionView = _views[from_id]
+		rv.pulse = 1.0
+		rv.mat.set_shader_parameter("pulse_color", UITheme.AMBER)
+	_update_fleet()
+
+
+func _on_fleet_arrived(to_id: String) -> void:
+	if _views.has(to_id):
+		var rv: RegionView = _views[to_id]
+		rv.pulse = 1.0
+		rv.mat.set_shader_parameter("pulse_color", UITheme.AMBER)
+	_update_fleet()
+
+
+func _on_combo_triggered(region_id: String, _until_tick: int) -> void:
+	if _views.has(region_id):
+		var rv: RegionView = _views[region_id]
+		rv.combo_active = true
+		_refresh_status_label(rv)
+		rv.pulse = 1.0
+		rv.mat.set_shader_parameter("pulse_color", UITheme.AMBER)
+
+
+func _update_fleet() -> void:
+	if _fleet_root == null:
+		return
+	var fst: Dictionary = GameState.fleet_status()
+	var active: bool = bool(fst.get("in_transit", false)) and not _menu_mode
+	_fleet_root.visible = active
+	if not active:
+		return
+	var path: Array = fst.get("path", [])
+	if path.size() < 2:
+		_fleet_root.visible = false
+		return
+	var hops: int = path.size() - 1
+	var t_all: float = clampf(float(fst.get("progress", 0.0)), 0.0, 1.0) * float(hops)
+	var seg: int = mini(int(floorf(t_all)), hops - 1)
+	var seg_t: float = clampf(t_all - float(seg), 0.0, 1.0)
+	var a: Vector2 = RegionData.anchor_of(str(path[seg]))
+	var b: Vector2 = RegionData.anchor_of(str(path[seg + 1]))
+	var dx: float = b.x - a.x
+	if dx > HALF_W:
+		b.x -= WORLD_W
+	elif dx < -HALF_W:
+		b.x += WORLD_W
+	var span: float = a.distance_to(b)
+	var lift: float = clampf(span * 0.18, 0.9, 3.0)
+	var p0 := Vector3(a.x, SEA_Y + 0.22, a.y)
+	var p2 := Vector3(b.x, SEA_Y + 0.22, b.y)
+	var p1 := (p0 + p2) * 0.5 + Vector3(0.0, lift, 0.0)
+	var pos := _bezier(p0, p1, p2, seg_t)
+	var ahead := _bezier(p0, p1, p2, minf(seg_t + 0.03, 1.0))
+	if ahead.distance_squared_to(pos) < 0.0001:
+		ahead = pos + Vector3(p2.x - p0.x, 0.0, p2.z - p0.z).normalized() * 0.1
+	var wx: float = wrapf(pos.x + HALF_W, 0.0, WORLD_W) - HALF_W
+	var dx_wrap: float = wx - pos.x
+	pos.x = wx
+	ahead.x += dx_wrap
+	for node in _fleet_nodes:
+		var ship: Node3D = node
+		var off: float = float(ship.get_meta("wrap_off", 0.0))
+		ship.position = pos + Vector3(off, sin(_time * 4.0) * 0.05, 0.0)
+		ship.look_at(Vector3(ahead.x + off, ship.position.y, ahead.z), Vector3.UP)
+
+
 func _on_spread_happened(from_id: String, to_id: String) -> void:
 	var found: bool = false
 	for item in _routes:
@@ -1589,7 +2862,7 @@ func _on_spread_happened(from_id: String, to_id: String) -> void:
 	elif _views.has(to_id):
 		var dst: RegionView = _views[to_id]
 		dst.flash = 1.0
-	if to_id == RegionData.HERO_ID:
+	if to_id == GameState.hq_region:
 		shake(0.35)
 	else:
 		shake(0.18)
@@ -1619,6 +2892,28 @@ func _on_action_performed(action_id: String, region_id: String) -> void:
 
 func _on_region_selected(region_id: String) -> void:
 	_selected = region_id if _views.has(region_id) else ""
+	if _menu_mode:
+		return
+	if _selected != "":
+		var rv: RegionView = _views[_selected]
+		if not _did_select_pan:
+			_pan_before_select = Vector2(_user_pan.x, _user_pan.z)
+		var wx: float = _nearest_wrap_x(rv.anchor.x)
+		var dx: float = wx - (GAME_TARGET.x + _user_pan.x)
+		var tx: float = _user_pan.x + clampf(dx * 0.55, -18.0, 18.0) if absf(dx) > 9.5 else _user_pan.x
+		# Shift view slightly south of the region so it remains visible above the bottom sheet.
+		var desired_z: float = clampf(rv.anchor.y + 4.2 - GAME_TARGET.z, -12.0, 12.5)
+		var tz: float = _user_pan.z
+		if desired_z > _user_pan.z + 1.0 or absf(rv.anchor.y - (GAME_TARGET.z + _user_pan.z)) > 5.0:
+			tz = desired_z
+		if absf(tx - _user_pan.x) > 0.25 or absf(tz - _user_pan.z) > 0.25:
+			_pan_goal = Vector2(tx, tz)
+			_has_pan_goal = true
+			_did_select_pan = true
+	elif _did_select_pan:
+		_pan_goal = Vector2(_pan_before_select.x, clampf(_pan_before_select.y, -11.5, 11.5))
+		_has_pan_goal = true
+		_did_select_pan = false
 
 
 ## Deselects through the bus so GameState.selected_region and the HUD clear as well.
@@ -1633,6 +2928,7 @@ func _on_language_changed(_lang: String) -> void:
 
 func _on_game_started() -> void:
 	_end_open = false
+	_update_hero_position()
 	_pending_flashes.clear()
 	for item in _routes:
 		var rt: RouteView = item
@@ -1652,40 +2948,41 @@ func _build_living_map() -> void:
 	_living_root = Node3D.new()
 	_living_root.name = "LivingMap"
 	add_child(_living_root)
-	# 1. Coastal City Lights along the Mediterranean
+	# 1. Major Global Coastal Hub Beacons (Miller projection coordinates)
 	var cities: Array = [
-		Vector2(16.7, 1.9),   # Antalya
-		Vector2(15.3, -2.9),  # Istanbul
-		Vector2(13.2, 0.1),   # Izmir
-		Vector2(9.8, 1.2),    # Athens
-		Vector2(-0.5, -6.2),  # Venice
-		Vector2(-2.2, -2.5),  # Rome
-		Vector2(-0.4, -1.2),  # Naples
-		Vector2(-8.8, -5.2),  # Marseilles
-		Vector2(-12.2, -2.2), # Barcelona
-		Vector2(16.2, 10.2),  # Alexandria
-		Vector2(21.8, 6.2),   # Beirut
-		Vector2(-2.5, 5.5),   # Tunis
+		Vector2(-28.13, -10.15), # Med-Black Sea Hub
+		Vector2(24.19, -11.91),  # New York
+		Vector2(-31.70, -15.65), # London
+		Vector2(-4.47, -10.31),  # Tokyo
+		Vector2(-8.35, -8.93),   # Shanghai
+		Vector2(-11.75, -0.37),  # Singapore
+		Vector2(-2.65, 9.73),    # Sydney
+		Vector2(27.23, 6.44),    # Rio de Janeiro
+		Vector2(14.75, -9.79),   # Los Angeles
+		Vector2(-17.70, -5.34),  # Mumbai
+		Vector2(-21.06, -7.12),  # Dubai
+		Vector2(-28.15, 9.74),   # Cape Town
 	]
 	for idx in cities.size():
 		var cp: Vector2 = cities[idx]
+		var cy: float = maxf(LAND_Y, _sample_surface_y(cp))
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		mat.albedo_color = Color(1.0, 0.80, 0.36, 0.78)
 		var cyl := CylinderMesh.new()
-		cyl.top_radius = 0.22
-		cyl.bottom_radius = 0.34
-		cyl.height = 0.08
+		cyl.top_radius = 0.24
+		cyl.bottom_radius = 0.36
+		cyl.height = 0.10
 		cyl.radial_segments = 12
 		var mi := MeshInstance3D.new()
 		mi.mesh = cyl
 		mi.material_override = mat
-		mi.position = Vector3(cp.x, LAND_Y + 0.05, cp.y)
+		mi.position = Vector3(cp.x, cy + 0.05, cp.y)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_living_root.add_child(mi)
-		_city_lights.append({"mi": mi, "mat": mat, "phase": float(idx) * 0.73})
+		_city_lights.append({"mi": mi, "mat": mat, "phase": float(idx) * 0.73, "base": cp})
 
 	# 2. 3D Patrol / Research Vessels in each sea region
 	var hull_mat := StandardMaterial3D.new()
@@ -1702,7 +2999,7 @@ func _build_living_map() -> void:
 		var anchor: Vector2 = RegionData.anchor_of(region_id)
 		var ship := Node3D.new()
 		var hull_mesh := BoxMesh.new()
-		hull_mesh.size = Vector3(0.20, 0.10, 0.56)
+		hull_mesh.size = Vector3(0.22, 0.12, 0.60)
 		var hull_mi := MeshInstance3D.new()
 		hull_mi.mesh = hull_mesh
 		hull_mi.material_override = hull_mat
@@ -1710,20 +3007,20 @@ func _build_living_map() -> void:
 		ship.add_child(hull_mi)
 
 		var cabin_mesh := BoxMesh.new()
-		cabin_mesh.size = Vector3(0.14, 0.10, 0.20)
+		cabin_mesh.size = Vector3(0.15, 0.11, 0.22)
 		var cabin_mi := MeshInstance3D.new()
 		cabin_mi.mesh = cabin_mesh
-		cabin_mi.position = Vector3(0.0, 0.09, -0.04)
+		cabin_mi.position = Vector3(0.0, 0.10, -0.04)
 		cabin_mi.material_override = hull_mat
 		cabin_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ship.add_child(cabin_mi)
 
 		var b_mesh := SphereMesh.new()
-		b_mesh.radius = 0.06
-		b_mesh.height = 0.12
+		b_mesh.radius = 0.07
+		b_mesh.height = 0.14
 		var b_mi := MeshInstance3D.new()
 		b_mi.mesh = b_mesh
-		b_mi.position = Vector3(0.0, 0.18, -0.04)
+		b_mi.position = Vector3(0.0, 0.20, -0.04)
 		b_mi.material_override = beacon_mat
 		b_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ship.add_child(b_mi)
@@ -1736,19 +3033,19 @@ func _build_living_map() -> void:
 			"center": anchor,
 			"angle": float(r_idx) * 0.95,
 			"speed": 0.42 + float(r_idx % 3) * 0.09,
-			"rx": 1.35 if region_id != "marmara" else 0.65,
-			"rz": 0.90 if region_id != "marmara" else 0.40,
+			"rx": 1.35,
+			"rz": 1.15,
 		})
 		r_idx += 1
 
-	# 3. 3D Offshore Wind Turbines along key shelves
+	# 3. 3D Offshore Wind Turbines along key global shelves (Miller projection coordinates)
 	var turbine_spots: Array = [
-		{"region": "aegean", "pos": Vector2(12.2, 0.6)},
-		{"region": "marmara", "pos": Vector2(14.6, -2.5)},
-		{"region": "adriatic", "pos": Vector2(0.8, -4.6)},
-		{"region": "western", "pos": Vector2(-9.6, -3.4)},
-		{"region": "central", "pos": Vector2(1.2, 3.2)},
-		{"region": "antalya", "pos": Vector2(15.2, 2.8)},
+		{"region": "north_atlantic", "pos": Vector2(26.50, -12.51)},
+		{"region": "mediterranean", "pos": Vector2(-29.20, -10.40)},
+		{"region": "east_asian", "pos": Vector2(-7.80, -8.25)},
+		{"region": "north_pacific", "pos": Vector2(12.00, -10.09)},
+		{"region": "coral_triangle", "pos": Vector2(-8.20, 1.66)},
+		{"region": "caribbean", "pos": Vector2(21.50, -4.89)},
 	]
 	var tower_mat := StandardMaterial3D.new()
 	tower_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -1760,33 +3057,33 @@ func _build_living_map() -> void:
 		var root := Node3D.new()
 		root.position = Vector3(tp.x, SEA_Y, tp.y)
 		var tower_mesh := CylinderMesh.new()
-		tower_mesh.top_radius = 0.04
-		tower_mesh.bottom_radius = 0.07
-		tower_mesh.height = 0.95
+		tower_mesh.top_radius = 0.05
+		tower_mesh.bottom_radius = 0.08
+		tower_mesh.height = 1.10
 		var tower_mi := MeshInstance3D.new()
 		tower_mi.mesh = tower_mesh
-		tower_mi.position = Vector3(0.0, 0.47, 0.0)
+		tower_mi.position = Vector3(0.0, 0.55, 0.0)
 		tower_mi.material_override = tower_mat
 		tower_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(tower_mi)
 
 		var rotor := Node3D.new()
-		rotor.position = Vector3(0.0, 0.94, 0.06)
+		rotor.position = Vector3(0.0, 1.08, 0.06)
 		for bi in 3:
 			var blade_holder := Node3D.new()
 			blade_holder.rotation.z = float(bi) * TAU / 3.0
 			var blade_mesh := BoxMesh.new()
-			blade_mesh.size = Vector3(0.04, 0.46, 0.02)
+			blade_mesh.size = Vector3(0.045, 0.52, 0.025)
 			var blade_mi := MeshInstance3D.new()
 			blade_mi.mesh = blade_mesh
-			blade_mi.position = Vector3(0.0, 0.22, 0.0)
+			blade_mi.position = Vector3(0.0, 0.25, 0.0)
 			blade_mi.material_override = tower_mat
 			blade_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			blade_holder.add_child(blade_mi)
 			rotor.add_child(blade_holder)
 		root.add_child(rotor)
 		_living_root.add_child(root)
-		_turbines.append({"root": root, "rotor": rotor, "region": str(spot["region"])})
+		_turbines.append({"root": root, "rotor": rotor, "region": str(spot["region"]), "base_x": tp.x})
 
 
 func _update_living_map(delta: float) -> void:
@@ -1798,6 +3095,9 @@ func _update_living_map(delta: float) -> void:
 			return
 	for cl in _city_lights:
 		var rec: Dictionary = cl
+		var mi: MeshInstance3D = rec["mi"]
+		var base: Vector2 = rec["base"]
+		mi.position.x = _nearest_wrap_x(base.x)
 		var mat: StandardMaterial3D = rec["mat"]
 		var ph: float = float(rec["phase"])
 		var pulse: float = 0.62 + 0.26 * (0.5 + 0.5 * sin(_time * 2.1 + ph))
@@ -1819,12 +3119,14 @@ func _update_living_map(delta: float) -> void:
 		var c: Vector2 = srec["center"]
 		var rx: float = float(srec["rx"])
 		var rz: float = float(srec["rz"])
-		var pos := Vector3(c.x + cos(ang) * rx, SEA_Y + 0.06, c.y + sin(ang) * rz)
+		var pos := Vector3(_nearest_wrap_x(c.x + cos(ang) * rx), SEA_Y + 0.06, c.y + sin(ang) * rz)
 		node.position = pos
 		node.rotation.y = atan2(-sin(ang) * rx, cos(ang) * rz)
 
 	for t in _turbines:
 		var trec: Dictionary = t
+		var root_node: Node3D = trec["root"]
+		root_node.position.x = _nearest_wrap_x(float(trec["base_x"]))
 		var rotor: Node3D = trec["rotor"]
 		var rid2: String = str(trec["region"])
 		var rv2: RegionView = _views.get(rid2, null)

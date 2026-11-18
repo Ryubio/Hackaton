@@ -1,7 +1,7 @@
 extends Control
 ## NewsTicker: the localized scrolling marquee in the HUD's 32 px top strip. Headlines come
 ## from EventBus.news and from ambient items generated out of live state (region stats and
-## trends, basin indicators, tips, real Mediterranean facts). Items are kept as key + args and
+## trends, ocean indicators, tips, real global ocean facts). Items are kept as key + args and
 ## re-rendered on language_changed; tone (-1 alarming, 0 neutral, 1 hopeful) colors them.
 
 const UITheme := preload("res://scripts/ui_theme.gd")
@@ -27,7 +27,7 @@ const FACT_KEYS := [
 	"news.fact.biodiversity", "news.fact.warming", "news.fact.plastic", "news.fact.posidonia",
 	"news.fact.posidonia_loss", "news.fact.caretta", "news.fact.monk_seal", "news.fact.lionfish",
 	"news.fact.mucilage", "news.fact.overfishing", "news.fact.renewal", "news.fact.barcelona",
-	"news.fact.cop31",
+	"news.fact.summit",
 ]
 const CHIP_KEYS := {"breaking": "news.chip.breaking", "good": "news.chip.good", "fact": "news.chip.fact", "tip": "news.chip.tip"}
 
