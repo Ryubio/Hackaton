@@ -1,5 +1,5 @@
 extends RefCounted
-## TechTree: the COP31 policy tree as DATA (4 branches, 24-28 nodes) plus the crisis
+## TechTree: the Global Ocean policy tree as DATA (4 branches, 24-28 nodes) plus the crisis
 ## evolutions (resistances) it counters. Pure data and lookups; crisis_sim.gd applies the
 ## effects, ui_tree.gd draws it. Effect vocabulary: docs/ARCHITECTURE.md section 11.
 
@@ -189,7 +189,7 @@ const NODES := [
 		"cost": {"budget": 20.0, "political": 0.0, "science": 30.0},
 		"requires": ["science_satellite"], "ramp_ticks": 6,
 		"effects": [
-			{"op": "region", "stat": "pollution", "value": -15.0, "target": "marmara"},
+			{"op": "region", "stat": "pollution", "value": -15.0, "target": "worst"},
 			{"op": "mul", "key": "heat_stress_mult", "value": 0.75},
 		],
 		"counters": ["source_surge"], "icon": "mucilage_alert",
@@ -324,8 +324,9 @@ const EVOLUTIONS := [
 	{
 		"id": "disinformation", "trigger": "branch", "branch": "science",
 		"effects": [
-			{"op": "mul", "key": "awareness_decay_mult", "value": 1.5},
+			{"op": "mul", "key": "awareness_decay_mult", "value": 3.0},
 			{"op": "mul", "key": "political_income_mult", "value": 0.8},
+			{"op": "mul", "key": "campaign_power_mult", "value": 0.4},
 		],
 		"icon": "fake_news",
 		"name_key": "evo.disinformation.name", "desc_key": "evo.disinformation.desc",

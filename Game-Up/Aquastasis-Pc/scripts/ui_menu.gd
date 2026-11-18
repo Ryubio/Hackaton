@@ -13,6 +13,7 @@ signal quit_requested()
 const UITheme := preload("res://scripts/ui_theme.gd")
 const Icons := preload("res://scripts/icons.gd")
 const Charts := preload("res://scripts/charts.gd")
+const RegionData := preload("res://scripts/region.gd")
 
 const BAND_H := 36.0
 const COLUMN_W := 960.0
@@ -77,6 +78,12 @@ var _gfx_buttons: Dictionary = {}
 var _fps_buttons: Dictionary = {}
 var _haptic_buttons: Dictionary = {}
 
+# HQ Selection Modal (after difficulty selection)
+var _hq_modal: Control = null
+var _hq_cards: Dictionary = {}
+var _hq_title_label: Label = null
+var _hq_sub_label: Label = null
+
 # End screen
 var _end_root: Control
 var _end_overlay: ColorRect
@@ -101,11 +108,13 @@ func _ready() -> void:
 	_build_end()
 	_build_achievements_modal()
 	_build_settings_modal()
+	_build_hq_modal()
 	_main_root.visible = false
 	_pause_root.visible = false
 	_end_root.visible = false
 	_ach_modal.visible = false
 	_settings_modal.visible = false
+	_hq_modal.visible = false
 	visible = false
 	EventBus.language_changed.connect(_on_language_changed)
 	EventBus.achievement_unlocked.connect(func(_id: String) -> void: _sync_achievements())
@@ -356,7 +365,7 @@ func _build_main() -> void:
 	_pulse.pulse_health = 38.0
 	top_row.add_child(_pulse)
 	var coords := _label("DimLabel")
-	coords.text = "36.8969° N · 30.7133° E · ANTALYA"
+	coords.text = "00.0000° N · 165.0000° E · GLOBAL OCEAN"
 	coords.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	coords.add_theme_color_override("font_color", UITheme.with_alpha(UITheme.HEALTHY, 0.8))
 	top_row.add_child(coords)
@@ -988,16 +997,26 @@ func is_pause_open() -> bool:
 	return _mode == "pause"
 
 
+func is_modal_open() -> bool:
+	return (_ach_modal != null and _ach_modal.visible) or (_settings_modal != null and _settings_modal.visible) or (_hq_modal != null and _hq_modal.visible)
+
+
+func close_modals() -> void:
+	if _ach_modal != null:
+		_ach_modal.visible = false
+	if _settings_modal != null:
+		_settings_modal.visible = false
+	if _hq_modal != null:
+		_hq_modal.visible = false
+
+
 # --- Internals -------------------------------------------------------------------------------
 
 func _open_root(root: Control) -> void:
 	_kill_anim()
 	visible = true
 	modulate = Color.WHITE
-	if _ach_modal != null:
-		_ach_modal.visible = false
-	if _settings_modal != null:
-		_settings_modal.visible = false
+	close_modals()
 	for r in [_main_root, _pause_root, _end_root]:
 		var c: Control = r
 		c.visible = c == root
@@ -1046,8 +1065,7 @@ func _set_title_spacing(v: float) -> void:
 func _on_start_pressed() -> void:
 	AudioSynth.play_click()
 	if _mode == "main":
-		GameState.clear_save_game()
-		start_requested.emit()
+		_open_hq_modal()
 
 
 func _on_continue_pressed() -> void:
@@ -1470,6 +1488,176 @@ func _close_settings_modal() -> void:
 	_settings_modal.visible = false
 
 
+func _build_hq_modal() -> void:
+	_hq_modal = _full_rect(self, Control.MOUSE_FILTER_STOP)
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = UITheme.with_alpha(UITheme.BG, 0.88)
+	_hq_modal.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hq_modal.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = &"MenuPanel"
+	panel.custom_minimum_size = Vector2(960.0, 620.0)
+	panel.draw.connect(_bracket_draw.bind(panel, UITheme.HEALTHY))
+	center.add_child(panel)
+
+	var col := _vbox(10)
+	panel.add_child(col)
+
+	var head := _hbox(12)
+	head.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(head)
+	head.add_child(_icon("target", UITheme.HEALTHY, 32.0))
+	_hq_title_label = _label("TitleLabel", "ui.hq.title")
+	_hq_title_label.add_theme_font_size_override("font_size", 28)
+	_hq_title_label.add_theme_color_override("font_color", UITheme.HEALTHY)
+	head.add_child(_hq_title_label)
+
+	_hq_sub_label = _label("DimLabel", "ui.hq.subtitle")
+	_hq_sub_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hq_sub_label.add_theme_font_size_override("font_size", 17)
+	_hq_sub_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hq_sub_label.custom_minimum_size = Vector2(860.0, 0.0)
+	col.add_child(_hq_sub_label)
+
+	var sep := HSeparator.new()
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(sep)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(880.0, 390.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.gui_input.connect(_on_scroll_touch_drag.bind(scroll))
+	col.add_child(scroll)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 10)
+	grid.mouse_filter = Control.MOUSE_FILTER_PASS
+	grid.gui_input.connect(_on_scroll_touch_drag.bind(scroll))
+	scroll.add_child(grid)
+
+	_hq_cards.clear()
+	for rid in RegionData.IDS:
+		var btn := Button.new()
+		btn.theme_type_variation = &"ChipButton"
+		btn.toggle_mode = true
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.custom_minimum_size = Vector2(420.0, 74.0)
+		btn.mouse_filter = Control.MOUSE_FILTER_PASS
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		btn.pressed.connect(_on_hq_selected.bind(rid))
+		grid.add_child(btn)
+
+		var m := MarginContainer.new()
+		m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		m.add_theme_constant_override("margin_left", 14)
+		m.add_theme_constant_override("margin_right", 14)
+		m.add_theme_constant_override("margin_top", 8)
+		m.add_theme_constant_override("margin_bottom", 8)
+		btn.add_child(m)
+
+		var v := _vbox(3)
+		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		m.add_child(v)
+
+		var top_r := _hbox(8)
+		top_r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_child(top_r)
+		var ic := _icon("target", UITheme.AMBER, 20.0)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		top_r.add_child(ic)
+		var nl := _label("HeaderLabel")
+		nl.add_theme_font_size_override("font_size", 19)
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nl.clip_text = true
+		top_r.add_child(nl)
+
+		var sl := _label("SmallLabel")
+		sl.add_theme_font_size_override("font_size", 15)
+		sl.add_theme_color_override("font_color", UITheme.TEXT_DIM)
+		sl.clip_text = true
+		v.add_child(sl)
+
+		_hq_cards[rid] = {
+			"btn": btn,
+			"icon": ic,
+			"name": nl,
+			"species": sl,
+		}
+
+	var sep2 := HSeparator.new()
+	sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(sep2)
+
+	var btn_row := _hbox(16)
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(btn_row)
+	var back_btn := _button("GhostButton", "close", "ui.hq.back", Vector2(240.0, 54.0), UITheme.TEXT_DIM)
+	back_btn.pressed.connect(_close_hq_modal)
+	btn_row.add_child(back_btn)
+	var confirm_btn := _button("PrimaryButton", "play", "ui.hq.confirm", Vector2(320.0, 54.0), UITheme.HEALTHY)
+	confirm_btn.pressed.connect(_on_hq_confirmed)
+	btn_row.add_child(confirm_btn)
+
+
+func _sync_hq_modal() -> void:
+	for rid in _hq_cards.keys():
+		var rec: Dictionary = _hq_cards[rid]
+		var btn: Button = rec["btn"]
+		var ic: Icons = rec["icon"]
+		var nl: Label = rec["name"]
+		var sl: Label = rec["species"]
+		var sel: bool = (rid == GameState.hq_region)
+		btn.set_pressed_no_signal(sel)
+		btn.text = ""
+		nl.text = I18n.t("region." + str(rid) + ".name")
+		nl.add_theme_color_override("font_color", UITheme.HEALTHY.lerp(Color.WHITE, 0.25) if sel else UITheme.TEXT)
+		sl.text = "🐾 " + I18n.t("region." + str(rid) + ".species") + "  ·  " + I18n.t("region." + str(rid) + ".trait")
+		sl.add_theme_color_override("font_color", UITheme.AMBER if sel else UITheme.TEXT_DIM)
+		ic.set_icon("target" if sel else "globe", UITheme.HEALTHY if sel else UITheme.TEXT_DIM, 20.0)
+
+
+func _on_hq_selected(rid: String) -> void:
+	GameState.hq_region = rid
+	AudioSynth.play_click()
+	GameState.vibrate_light()
+	_sync_hq_modal()
+
+
+func _open_hq_modal() -> void:
+	if not RegionData.DEFS.has(GameState.hq_region):
+		GameState.hq_region = RegionData.HERO_ID
+	_sync_hq_modal()
+	_hq_modal.visible = true
+
+
+func _close_hq_modal() -> void:
+	AudioSynth.play_click()
+	GameState.vibrate_light()
+	_hq_modal.visible = false
+
+
+func _on_hq_confirmed() -> void:
+	AudioSynth.play_click()
+	GameState.vibrate_medium()
+	_hq_modal.visible = false
+	GameState.clear_save_game()
+	start_requested.emit()
+
+
 func _on_diff_selected(d_id: String) -> void:
 	GameState.selected_difficulty = d_id
 	AudioSynth.play_click()
@@ -1530,6 +1718,7 @@ func _on_language_changed(_lang: String) -> void:
 	_sync_lang_buttons()
 	_sync_continue_button()
 	_sync_achievements()
+	_sync_hq_modal()
 	_update_diff_selection(GameState.selected_difficulty)
 	_title_ctrl.queue_redraw()
 	if _mode == "main":

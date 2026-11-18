@@ -1,5 +1,5 @@
 extends Control
-## UIEventCard: two-choice decision card modal (oil spill, heatwave, COP31 summits, ...).
+## UIEventCard: two-choice decision card modal (oil spill, heatwave, Global Ocean summits, ...).
 ## Opens on EventBus.event_triggered, pauses simulation until resolved via
 ## GameState.resolve_event(choice_index), and resumes time cleanly without locking input.
 

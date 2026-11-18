@@ -24,21 +24,21 @@ const STRINGS := {
 	# --- Title ---
 	"game.title": {"tr": "AQUASTASIS", "en": "AQUASTASIS", "ru": "AQUASTASIS"},
 	"game.subtitle": {
-		"tr": "COP31 Antalya — Akdeniz Ekosistem Savunması",
-		"en": "COP31 Antalya — Mediterranean Ecosystem Defense",
-		"ru": "COP31 Анталья — Защита экосистемы Средиземноморья",
+		"tr": "Küresel Okyanus Ekosistem Savunması",
+		"en": "Global Ocean Ecosystem Defense",
+		"ru": "Глобальная защита экосистемы океанов",
 	},
 
 	# --- Main menu ---
 	"ui.menu.tagline": {
-		"tr": "Akdeniz havzası çöküyor. Sen COP31 Deniz Koalisyonusun.",
-		"en": "The basin is collapsing. You are the COP31 Marine Coalition.",
-		"ru": "Средиземноморье на грани коллапса. Вы — Морская коалиция COP31.",
+		"tr": "Dünya okyanusları çöküyor. Sen Küresel Deniz Koalisyonusun.",
+		"en": "The world's oceans are collapsing. You are the Global Marine Coalition.",
+		"ru": "Мировой океан на грани коллапса. Вы — Глобальная морская коалиция.",
 	},
 	"ui.menu.briefing": {
-		"tr": "Deniz Sağlığı Krizini tüm Akdeniz'e yayılmadan durdur. 2046'ya kadar Deniz Sağlığı Endeksini %60'a çıkar ya da her bölgedeki krizi %25'in altına indir. Isınma +4.0°C'ye ulaşırsa, Deniz Sağlığı %10'un altına düşerse ya da bütçe ve siyasi destek birlikte tükenirse kaybedersin.",
-		"en": "Stop the Marine Health Crisis before it spreads across the Mediterranean. Reach a Sea Health Index of 60% by 2046, or push every region's crisis below 25%. You lose if warming hits +4.0°C, Sea Health falls under 10%, or both budget and political support run out.",
-		"ru": "Остановите экологический кризис, пока он не охватил всё Средиземноморье. Доведите индекс здоровья моря до 60% к 2046 году или снизьте уровень кризиса во всех регионах ниже 25%. Поражение: потепление до +4.0°C, здоровье моря ниже 10% или потеря и бюджета, и политической поддержки.",
+		"tr": "Deniz Sağlığı Krizini tüm okyanuslara yayılmadan durdur. 2046'ya kadar Deniz Sağlığı Endeksini %60'a çıkar ya da her bölgedeki krizi %25'in altına indir. Isınma +4.0°C'ye ulaşırsa, Deniz Sağlığı %10'un altına düşerse ya da bütçe ve siyasi destek birlikte tükenirse kaybedersin.",
+		"en": "Stop the Marine Health Crisis before it spreads across the global oceans. Reach a Sea Health Index of 60% by 2046, or push every region's crisis below 25%. You lose if warming hits +4.0°C, Sea Health falls under 10%, or both budget and political support run out.",
+		"ru": "Остановите экологический кризис, пока он не охватил весь Мировой океан. Доведите индекс здоровья моря до 60% к 2046 году или снизьте уровень кризиса во всех регионах ниже 25%. Поражение: потепление до +4.0°C, здоровье моря ниже 10% или потеря и бюджета, и политической поддержки.",
 	},
 	"ui.menu.start": {"tr": "Yeni Oyun", "en": "New Game", "ru": "Новая игра"},
 	"ui.menu.language": {"tr": "Dil", "en": "Language", "ru": "Язык"},
@@ -47,15 +47,25 @@ const STRINGS := {
 	"ui.audio.mute_off": {"tr": "🔊 Açık", "en": "🔊 Sound On", "ru": "🔊 Звук вкл"},
 	"ui.menu.quit": {"tr": "Çıkış", "en": "Quit", "ru": "Выход"},
 	"ui.menu.event_line": {
-		"tr": "GameUP Türkiye Oyun Hackathonu · COP31 Türkiye – Antalya",
-		"en": "GameUP Türkiye Game Hackathon · COP31 Türkiye – Antalya",
-		"ru": "Игровой хакатон GameUP Türkiye · COP31, Анталья, Турция",
+		"tr": "AQUASTASIS 2.0 · Küresel Okyanus Komuta Ağı · 2026–2046",
+		"en": "AQUASTASIS 2.0 · Global Ocean Command Network · 2026–2046",
+		"ru": "AQUASTASIS 2.0 · Глобальная океаническая сеть управления · 2026–2046",
 	},
 	"ui.menu.controls": {
 		"tr": "Bölge seçmek için denize tıkla · Boşluk: duraklat · 1 / 2 / 3: hız · Esc: menü",
 		"en": "Click a sea region to select it · Space: pause · 1 / 2 / 3: speed · Esc: menu",
 		"ru": "Выбор региона: щелчок по морю · Пробел: пауза · 1 / 2 / 3: скорость · Esc: меню",
 	},
+
+	# --- HQ Selection Modal ---
+	"ui.hq.title": {"tr": "KARARGAH BÖLGESİ SEÇİMİ", "en": "SELECT HEADQUARTERS REGION", "ru": "ВЫБОР РЕГИОНА ШТАБА"},
+	"ui.hq.subtitle": {
+		"tr": "Komuta merkezini kuracağın okyanus bölgesini seç. Karargah bölgesinin bütünlüğü çökerse operasyon kaybedilir.",
+		"en": "Choose the ocean region for your command center. If your headquarters region collapses, the mission is lost.",
+		"ru": "Выберите океанический регион для командного центра. Если регион штаба рухнет, миссия будет провалена.",
+	},
+	"ui.hq.back": {"tr": "Geri Dön", "en": "Back", "ru": "Назад"},
+	"ui.hq.confirm": {"tr": "Karargahı Kur ve Başla", "en": "Establish HQ & Launch", "ru": "Основать штаб и начать"},
 
 	# --- Pause menu ---
 	"ui.pause.title": {"tr": "DURAKLATILDI", "en": "PAUSED", "ru": "ПАУЗА"},
@@ -76,7 +86,7 @@ const STRINGS := {
 	"hud.budget": {"tr": "Bütçe", "en": "Budget", "ru": "Бюджет"},
 	"hud.political": {"tr": "Siyasi Destek", "en": "Political Support", "ru": "Политическая поддержка"},
 	"hud.science": {"tr": "Bilim", "en": "Science", "ru": "Наука"},
-	"hud.global_title": {"tr": "HAVZA DURUMU", "en": "BASIN STATUS", "ru": "СОСТОЯНИЕ АКВАТОРИИ"},
+	"hud.global_title": {"tr": "OKYANUS DURUMU", "en": "OCEAN STATUS", "ru": "СОСТОЯНИЕ ОКЕАНА"},
 	"hud.sea_health": {"tr": "Deniz Sağlığı Endeksi", "en": "Sea Health Index", "ru": "Индекс здоровья моря"},
 	"hud.crisis": {"tr": "Kriz Seviyesi", "en": "Crisis Level", "ru": "Уровень кризиса"},
 	"hud.temperature": {"tr": "Küresel Isınma", "en": "Global Warming", "ru": "Глобальное потепление"},
@@ -91,13 +101,13 @@ const STRINGS := {
 	# --- HUD: region panel ---
 	"hud.region_title": {"tr": "BÖLGE", "en": "REGION", "ru": "РЕГИОН"},
 	"hud.region.none": {
-		"tr": "Haritadan bir deniz bölgesi seç.",
-		"en": "Select a sea region on the map.",
-		"ru": "Выберите морской регион на карте.",
+		"tr": "Haritadan bir okyanus bölgesi seç.",
+		"en": "Select an ocean region on the map.",
+		"ru": "Выберите океанический регион на карте.",
 	},
 	"hud.region.pollution": {"tr": "Kirlilik", "en": "Pollution", "ru": "Загрязнение"},
 	"hud.region.coral": {"tr": "Mercan Sağlığı", "en": "Coral Health", "ru": "Здоровье кораллов"},
-	"hud.region.seagrass": {"tr": "Posidonia Çayırları", "en": "Posidonia Seagrass", "ru": "Луга посидонии"},
+	"hud.region.seagrass": {"tr": "Deniz Çayırları", "en": "Seagrass Meadows", "ru": "Морские травы"},
 	"hud.region.fish": {"tr": "Balık Stoku", "en": "Fish Stock", "ru": "Рыбные запасы"},
 	"hud.region.awareness": {"tr": "Halk Bilinci & Destek", "en": "Public Support", "ru": "Поддержка общества"},
 	"hud.region.protection": {"tr": "Deniz Koruma Kalkanı", "en": "Marine Protection", "ru": "Морская охрана"},
@@ -131,39 +141,49 @@ const STRINGS := {
 	},
 	"action.patrol.name": {"tr": "Deniz Devriyesi", "en": "Marine Patrol", "ru": "Морской патруль"},
 	"action.patrol.desc": {
-		"tr": "Kaçak avlanmayı ve atık deşarjını engeller (-3% kirlilik, +20 koruma kalkanı, yayılmayı önler).",
-		"en": "Intercepts illegal fishing and waste (-3% pollution, +20 protection shield, blocks crisis spread).",
-		"ru": "Пресекает сброс отходов и браконьерство (-3% загрязнения, +20 защиты, блокирует распространение).",
+		"tr": "Kaçak avlanmayı ve atık deşarjını engeller (-1.5 kirlilik, +20 koruma kalkanı, yayılmayı azaltır).",
+		"en": "Intercepts illegal fishing and waste (-1.5 pollution, +20 protection shield, slows crisis spread).",
+		"ru": "Пресекает сброс отходов и браконьерство (-1.5 загрязнения, +20 защиты, замедляет распространение).",
 	},
 	"action.campaign.name": {"tr": "Farkındalık Kampanyası", "en": "Awareness Campaign", "ru": "Просветительская кампания"},
 	"action.campaign.desc": {
-		"tr": "Halkı kıyı temizliğine seferber eder (-4% kirlilik, +25 halk bilinci, +2.5 siyasi destek).",
-		"en": "Mobilizes coastal cleanups and civic outreach (-4% pollution, +25 awareness, +2.5 political support).",
-		"ru": "Мобилизует гражданские субботники (-4% загрязнения, +25 осведомленности, +2.5 очков поддержки).",
+		"tr": "Halkı kıyı temizliğine seferber eder (-1 kirlilik, +18 halk bilinci, komşu bölgelere +9).",
+		"en": "Mobilizes coastal cleanups and civic outreach (-1 pollution, +18 awareness, +9 in neighbouring regions).",
+		"ru": "Мобилизует гражданские субботники (-1 загрязнения, +18 осведомленности, +9 в соседних регионах).",
 	},
 
-	# --- Regions and map ---
-	"region.western.name": {"tr": "Batı Akdeniz", "en": "Western Med", "ru": "Западное Средиземноморье"},
-	# Russian drops the English hints in parentheses: the full names already wrap to two
-	# lines on the map labels, so a third line would cover the region.
-	"region.central.name": {
-		"tr": "Orta Akdeniz (Sicilya Boğazı)",
-		"en": "Central Med (Sicily Strait)",
-		"ru": "Центральное Средиземноморье",
-	},
-	"region.adriatic.name": {"tr": "Adriyatik", "en": "Adriatic", "ru": "Адриатика"},
-	"region.aegean.name": {"tr": "Ege Kıyıları", "en": "Aegean Coast", "ru": "Эгейское побережье"},
-	"region.marmara.name": {"tr": "Marmara İç Denizi", "en": "Marmara Inland Sea", "ru": "Мраморное море"},
-	"region.blacksea.name": {"tr": "Karadeniz Girişi", "en": "Black Sea Entrance", "ru": "Вход в Чёрное море"},
-	"region.antalya.name": {"tr": "Antalya Körfezi", "en": "Antalya Gulf", "ru": "Анталийский залив"},
-	"region.levant.name": {"tr": "Levant (Doğu Akdeniz)", "en": "Levant (Eastern Med)", "ru": "Левант"},
-	"map.hero_label": {"tr": "ANTALYA · COP31", "en": "ANTALYA · COP31", "ru": "АНТАЛЬЯ · COP31"},
+	# --- 12 Global Ocean Regions and Flagship Species ---
+	"region.north_atlantic.name": {"tr": "Kuzey Atlantik", "en": "North Atlantic", "ru": "Северная Атлантика"},
+	"region.north_atlantic.species": {"tr": "Atlantik morinası, kambur balina", "en": "Atlantic cod, humpback whale", "ru": "Атлантическая треска, горбатый кит"},
+	"region.south_atlantic.name": {"tr": "Güney Atlantik", "en": "South Atlantic", "ru": "Южная Атлантика"},
+	"region.south_atlantic.species": {"tr": "Deri sırtlı kaplumbağa", "en": "Leatherback turtle", "ru": "Кожистая черепаха"},
+	"region.caribbean.name": {"tr": "Karayipler & Meksika Körfezi", "en": "Caribbean & Gulf of Mexico", "ru": "Карибы и Мексиканский залив"},
+	"region.caribbean.species": {"tr": "Manati, mercan resifleri", "en": "Manatee, coral reefs", "ru": "Ламантин, коралловые рифы"},
+	"region.mediterranean.name": {"tr": "Akdeniz & Karadeniz", "en": "Mediterranean & Black Sea", "ru": "Средиземное и Чёрное моря"},
+	"region.mediterranean.species": {"tr": "Caretta caretta, Akdeniz foku", "en": "Loggerhead turtle, monk seal", "ru": "Черепаха каретта, тюлень-монах"},
+	"region.red_arabian.name": {"tr": "Kızıldeniz & Arap Denizi", "en": "Red Sea & Arabian Sea", "ru": "Красное и Аравийское моря"},
+	"region.red_arabian.species": {"tr": "Dugong", "en": "Dugong", "ru": "Дюгонь"},
+	"region.indian.name": {"tr": "Hint Okyanusu", "en": "Indian Ocean", "ru": "Индийский океан"},
+	"region.indian.species": {"tr": "Balina köpekbalığı", "en": "Whale shark", "ru": "Китовая акула"},
+	"region.coral_triangle.name": {"tr": "Mercan Üçgeni (GD Asya)", "en": "Coral Triangle (SE Asia)", "ru": "Коралловый треугольник"},
+	"region.coral_triangle.species": {"tr": "Yeşil deniz kaplumbağası", "en": "Green sea turtle", "ru": "Зелёная морская черепаха"},
+	"region.east_asian.name": {"tr": "Doğu Asya Denizleri", "en": "East Asian Seas", "ru": "Восточноазиатские моря"},
+	"region.east_asian.species": {"tr": "Benekli fok", "en": "Spotted seal", "ru": "Ларга (пятнистый тюлень)"},
+	"region.north_pacific.name": {"tr": "Kuzey Pasifik", "en": "North Pacific", "ru": "Северная Пацифика"},
+	"region.north_pacific.species": {"tr": "Deniz samuru", "en": "Sea otter", "ru": "Калан (морская выдра)"},
+	"region.south_pacific.name": {"tr": "Güney Pasifik & Büyük Set Resifi", "en": "South Pacific & Great Barrier Reef", "ru": "Южная Пацифика и Большой Барьерный риф"},
+	"region.south_pacific.species": {"tr": "Resif mantası", "en": "Reef manta ray", "ru": "Рифовая манта"},
+	"region.arctic.name": {"tr": "Arktik Okyanusu", "en": "Arctic Ocean", "ru": "Северный Ледовитый океан"},
+	"region.arctic.species": {"tr": "Kutup ayısı, narval", "en": "Polar bear, narwhal", "ru": "Белый медведь, нарвал"},
+	"region.southern.name": {"tr": "Güney Okyanusu (Antarktika)", "en": "Southern Ocean (Antarctica)", "ru": "Южный океан (Антарктика)"},
+	"region.southern.species": {"tr": "İmparator penguen, kril", "en": "Emperor penguin, krill", "ru": "Императорский пингвин, криль"},
+	"map.hero_label": {"tr": "KARARGAH", "en": "HEADQUARTERS", "ru": "ШТАБ"},
 
 	# --- Toasts ---
 	"toast.game_start": {
-		"tr": "COP31 Deniz Koalisyonu göreve başladı. Havza artık sana emanet.",
-		"en": "COP31 Marine Coalition activated. The basin is in your hands.",
-		"ru": "Морская коалиция COP31 приступила к работе. Судьба моря — в ваших руках.",
+		"tr": "Küresel Deniz Koalisyonu göreve başladı. Okyanuslar artık sana emanet.",
+		"en": "Global Marine Coalition activated. The oceans are in your hands.",
+		"ru": "Глобальная морская коалиция приступила к работе. Судьба океанов — в ваших руках.",
 	},
 	"toast.spread": {"tr": "Kriz yayılıyor: {from} → {to}", "en": "Crisis spreading: {from} → {to}", "ru": "Кризис распространяется: {from} → {to}"},
 	"toast.region_critical": {
@@ -204,11 +224,11 @@ const STRINGS := {
 	},
 
 	# --- End screens ---
-	"end.win.title": {"tr": "HAVZA KURTARILDI", "en": "BASIN RESTORED", "ru": "МОРЕ ВОЗРОЖДЕНО"},
+	"end.win.title": {"tr": "OKYANUSLAR KURTARILDI", "en": "OCEANS RESTORED", "ru": "ОКЕАНЫ ВОЗРОЖДЕНЫ"},
 	"end.win.health.text": {
-		"tr": "Akdeniz yeniden nefes alıyor. {year} yılına kadar Deniz Sağlığı %{health} seviyesine ulaştı.",
-		"en": "The Mediterranean breathes again. Sea Health reached {health}% by {year}.",
-		"ru": "Средиземное море снова дышит. К {year} году здоровье моря достигло {health}%.",
+		"tr": "Dünya okyanusları yeniden nefes alıyor. {year} yılına kadar Deniz Sağlığı %{health} seviyesine ulaştı.",
+		"en": "The world's oceans breathe again. Sea Health reached {health}% by {year}.",
+		"ru": "Мировой океан снова дышит. К {year} году здоровье моря достигло {health}%.",
 	},
 	"end.win.crisis.text": {
 		"tr": "Tüm bölgeler kriz eşiğinin altında. Tersine pandemi kontrol altına alındı.",
@@ -221,11 +241,11 @@ const STRINGS := {
 		"en": "Global warming hit +4.0°C. Marine ecosystems collapsed beyond recovery.",
 		"ru": "Глобальное потепление достигло +4.0°C. Морские экосистемы разрушены безвозвратно.",
 	},
-	"end.lose.health.title": {"tr": "ÖLÜ DENİZ", "en": "DEAD SEA", "ru": "МЁРТВОЕ МОРЕ"},
+	"end.lose.health.title": {"tr": "ÖLÜ OKYANUS", "en": "DEAD OCEAN", "ru": "МЁРТВЫЙ ОКЕАН"},
 	"end.lose.health.text": {
-		"tr": "Deniz Sağlığı %10'un altına düştü. Havza artık yaşamı sürdüremiyor.",
-		"en": "Sea Health fell below 10%. The basin can no longer sustain life.",
-		"ru": "Здоровье моря упало ниже 10%. Море больше не способно поддерживать жизнь.",
+		"tr": "Deniz Sağlığı %10'un altına düştü. Okyanuslar artık yaşamı sürdüremiyor.",
+		"en": "Sea Health fell below 10%. The oceans can no longer sustain life.",
+		"ru": "Здоровье моря упало ниже 10%. Океан больше не способен поддерживать жизнь.",
 	},
 	"end.lose.resources.title": {"tr": "KOALİSYON DAĞILDI", "en": "COALITION COLLAPSED", "ru": "КОАЛИЦИЯ РАСПАЛАСЬ"},
 	"end.lose.resources.text": {
@@ -233,17 +253,17 @@ const STRINGS := {
 		"en": "Budget and political support are both gone. The coalition has dissolved.",
 		"ru": "Не осталось ни бюджета, ни политической поддержки. Коалиция прекратила существование.",
 	},
-	"end.lose.hq.title": {"tr": "ANTALYA KARARGAHI ÇÖKTÜ", "en": "ANTALYA HQ COLLAPSED", "ru": "ШТАБ-КВАРТИРА В АНТАЛЬЕ ПАЛА"},
+	"end.lose.hq.title": {"tr": "KARARGAH ÇÖKTÜ", "en": "HEADQUARTERS COLLAPSED", "ru": "ШТАБ-КВАРТИРА ПАЛА"},
 	"end.lose.hq.text": {
-		"tr": "Antalya Körfezi ekolojik çöküş sınırını aştı. Koalisyon operasyonel merkezini ve meşruiyetini kaybetti.",
-		"en": "Antalya Gulf crossed the ecological collapse limit. The coalition lost its operational headquarters and legitimacy.",
-		"ru": "Залив Антальи перешел порог экологического коллапса. Коалиция потеряла оперативный штаб и легитимность.",
+		"tr": "Karargah bölgesi ekolojik çöküş sınırını aştı. Koalisyon operasyonel merkezini ve meşruiyetini kaybetti.",
+		"en": "Your headquarters region crossed the ecological collapse limit. The coalition lost its operational center and legitimacy.",
+		"ru": "Регион штаб-квартиры перешел порог экологического коллапса. Коалиция потеряла оперативный штаб и легитимность.",
 	},
 	"end.lose.time.title": {"tr": "SÜRE DOLDU", "en": "TIME RAN OUT", "ru": "ВРЕМЯ ВЫШЛО"},
 	"end.lose.time.text": {
-		"tr": "2046 geldi, havza hâlâ hasta. Deniz Sağlığı: %{health}.",
-		"en": "2046 has arrived and the basin is still sick. Sea Health: {health}%.",
-		"ru": "Наступил 2046 год, а море так и не оправилось. Здоровье моря: {health}%.",
+		"tr": "2046 geldi, okyanuslar hâlâ hasta. Deniz Sağlığı: %{health}.",
+		"en": "2046 has arrived and the oceans are still sick. Sea Health: {health}%.",
+		"ru": "Наступил 2046 год, а океан так и не оправился. Здоровье моря: {health}%.",
 	},
 	"end.stat.health": {"tr": "Deniz Sağlığı Endeksi: %{v}", "en": "Sea Health Index: {v}%", "ru": "Индекс здоровья моря: {v}%"},
 	"end.stat.temp": {"tr": "Küresel ısınma: +{v}°C", "en": "Global warming: +{v}°C", "ru": "Глобальное потепление: +{v}°C"},

@@ -1,5 +1,5 @@
 ; Engine configuration file.
-; Aquastasis - COP31 Antalya hackathon prototype (Mobile-First Overhaul).
+; Aquastasis - Global Ocean Ecosystem Strategy Simulation (Mobile-First Overhaul).
 ; Autoload order is mandatory: EventBus, Balance, I18n, GameState.
 
 config_version=5
@@ -7,7 +7,8 @@ config_version=5
 [application]
 
 config/name="Aquastasis"
-config/description="COP31 Antalya - Mediterranean Ecosystem Defense"
+config/description="Global Ocean Ecosystem Defense"
+config/version="2.0.0"
 run/main_scene="res://main.tscn"
 run/max_fps=60
 config/features=PackedStringArray("4.3", "Mobile")

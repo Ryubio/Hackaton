@@ -48,6 +48,8 @@ var _anim: Tween = null
 var _snap: Dictionary = {}
 var _selected_id: String = ""
 var _hover_id: String = ""
+var _hover_resist: String = ""
+var _hover_counter_ids: Array[String] = []
 var _adopt_flash: float = 0.0
 var _adopt_enabled: bool = false
 var _fit_level: int = 0
@@ -162,6 +164,8 @@ func open() -> void:
 	GameState.set_pause_reason("tree", true)
 	EventBus.tree_toggled.emit(true)
 	_hover_id = ""
+	_hover_resist = ""
+	_hover_counter_ids.clear()
 	_snap = GameState.get_snapshot()
 	_refresh_states()
 	if _selected_id == "" or not _tiles.has(_selected_id):
@@ -177,6 +181,8 @@ func close() -> void:
 	if not _open:
 		return
 	_open = false
+	_hover_resist = ""
+	_hover_counter_ids.clear()
 	GameState.set_pause_reason("tree", false)
 	EventBus.tree_toggled.emit(false)
 	_play_close()
@@ -1451,9 +1457,11 @@ func _rebuild_resist_chips() -> void:
 func _resist_chip(evo_id: String) -> PanelContainer:
 	var def: Dictionary = TechTree.evolution_def(evo_id)
 	var p := PanelContainer.new()
-	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.mouse_filter = Control.MOUSE_FILTER_PASS
 	p.add_theme_stylebox_override("panel", UITheme.stripe_box(UITheme.CRISIS, 0.8))
 	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	p.mouse_entered.connect(_on_resist_hover.bind(p, evo_id, true))
+	p.mouse_exited.connect(_on_resist_hover.bind(p, evo_id, false))
 	var row := _hbox(10)
 	p.add_child(row)
 	row.add_child(_icon(str(def.get("icon", "evolution")), UITheme.CRISIS.lerp(Color.WHITE, 0.15), 30.0))
@@ -1584,6 +1592,34 @@ func _on_counter_hover(btn: Button, node_id: String, on: bool) -> void:
 		_hover_id = ""
 		_tween_tile(node_id, false)
 	_refresh_details()
+
+
+func _on_resist_hover(panel: Control, evo_id: String, on: bool) -> void:
+	if not on and Rect2(Vector2.ZERO, panel.size).has_point(panel.get_local_mouse_position()):
+		return
+	if on:
+		_hover_resist = evo_id
+		var next_ids: Array[String] = []
+		for nid in TechTree.counters_of(evo_id):
+			var s_id := str(nid)
+			next_ids.append(s_id)
+		for old_id in _hover_counter_ids:
+			if not next_ids.has(old_id) and old_id != _hover_id:
+				_tween_tile(old_id, false)
+		_hover_counter_ids = next_ids
+		for nid in _hover_counter_ids:
+			_tween_tile(nid, true)
+			if _tiles.has(nid):
+				(_tiles[nid] as Control).queue_redraw()
+	elif _hover_resist == evo_id:
+		_hover_resist = ""
+		var prev_ids: Array[String] = _hover_counter_ids.duplicate()
+		_hover_counter_ids.clear()
+		for nid in prev_ids:
+			if nid != _hover_id:
+				_tween_tile(nid, false)
+			if _tiles.has(nid):
+				(_tiles[nid] as Control).queue_redraw()
 
 
 func _tween_tile(id: String, on: bool) -> void:
@@ -1998,12 +2034,18 @@ func _draw_tile(id: String) -> void:
 			border = UITheme.with_alpha(col, 0.42)
 			bw = 1.2
 	glow_a += hov * 0.16
+	var counter_hi: bool = _hover_counter_ids.has(id)
 	if sel:
 		glow_a += 0.08
-	if hov > 0.0:
+	if counter_hi:
+		glow_a = maxf(glow_a, 0.36 + 0.16 * pulse)
+		border = UITheme.WARNING.lerp(Color.WHITE, 0.25)
+		bw = maxf(bw, 2.4)
+	elif hov > 0.0:
 		border = UITheme.with_alpha(border.lerp(col.lerp(Color.WHITE, 0.35), hov * 0.6), minf(1.0, border.a + hov * 0.35))
 	if glow_a > 0.0:
-		tile.draw_polyline(loop, UITheme.with_alpha(col, glow_a), 8.0, true)
+		var gcol: Color = UITheme.WARNING if counter_hi else col
+		tile.draw_polyline(loop, UITheme.with_alpha(gcol, glow_a), 10.0 if counter_hi else 8.0, true)
 	tile.draw_colored_polygon(pts, fill)
 	if st == "adopted":
 		var top_c: Color = UITheme.with_alpha(col, 0.16)

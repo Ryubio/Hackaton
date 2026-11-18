@@ -17,25 +17,27 @@ var speed_index: int = 1           # index into Balance.SPEEDS (0 = pause)
 var selected_region: String = ""
 var game_seed: int = 0
 var selected_difficulty: String = "commander"
+var hq_region: String = RegionData.HERO_ID
 
 var _last_speed: int = 1
 var _accumulator: float = 0.0
 var _pause_reasons: Dictionary = {}   # "menu" | "tree" | "event" | "summit" | "tutorial" -> true; any reason pauses time
 
 const SAVE_PATH := "user://savegame.dat"
+const SAVE_VERSION := 2
 const ACH_PATH := "user://achievements.cfg"
 const SETTINGS_PATH := "user://settings.cfg"
 const DIFF_IDS := ["cadet", "commander", "admiral"]
 const ACH_IDS := [
-	"marmara_zero",
-	"antalya_zero",
-	"aegean_zero",
-	"adriatic_zero",
-	"blacksea_zero",
-	"levant_zero",
-	"western_zero",
-	"central_zero",
-	"marmara_clean",
+	"north_atlantic_zero",
+	"mediterranean_zero",
+	"coral_triangle_zero",
+	"arctic_zero",
+	"southern_zero",
+	"east_asian_zero",
+	"caribbean_zero",
+	"south_pacific_zero",
+	"east_asian_clean",
 	"species_guardian",
 	"reformer",
 	"full_shield",
@@ -208,26 +210,26 @@ func _check_achievements(won_game: bool = false) -> void:
 	var d: String = sim.difficulty if sim.difficulty != "" else selected_difficulty
 	# 1-8: Regional 0% crisis achievements
 	var zero_map := {
-		"marmara": "marmara_zero",
-		"antalya": "antalya_zero",
-		"aegean": "aegean_zero",
-		"adriatic": "adriatic_zero",
-		"blacksea": "blacksea_zero",
-		"levant": "levant_zero",
-		"western": "western_zero",
-		"central": "central_zero",
+		"north_atlantic": "north_atlantic_zero",
+		"mediterranean": "mediterranean_zero",
+		"coral_triangle": "coral_triangle_zero",
+		"arctic": "arctic_zero",
+		"southern": "southern_zero",
+		"east_asian": "east_asian_zero",
+		"caribbean": "caribbean_zero",
+		"south_pacific": "south_pacific_zero",
 	}
 	for rid in zero_map:
 		if sim.regions.has(rid):
 			var r_zero = sim.regions[rid]
 			if r_zero.crisis_level() <= 1.0:
 				unlock_achievement(zero_map[rid], d)
-	# 9: Marmara clean & healthy
-	if sim.regions.has("marmara"):
-		var mr = sim.regions["marmara"]
+	# 9: East Asian Seas clean & healthy
+	if sim.regions.has("east_asian"):
+		var mr = sim.regions["east_asian"]
 		if mr.pollution <= 15.0 and mr.health() >= 80.0:
-			unlock_achievement("marmara_clean", d)
-	# 10: Biodiversity guardian (Caretta nests + Monk seals)
+			unlock_achievement("east_asian_clean", d)
+	# 10: Biodiversity guardian (Flagship marine populations)
 	if sim.turtle_nests() + sim.monk_seals() >= 2800:
 		unlock_achievement("species_guardian", d)
 	# 11: Policy reformer (10+ policies adopted)
@@ -240,7 +242,7 @@ func _check_achievements(won_game: bool = false) -> void:
 			if r.protection >= 85.0:
 				unlock_achievement("full_shield", d)
 				break
-	# 13: High basin-wide public awareness (>= 75%)
+	# 13: High global public awareness (>= 75%)
 	if sim.avg_awareness() >= 75.0:
 		unlock_achievement("high_awareness", d)
 	# 14 & 15: Victory achievements
@@ -253,11 +255,19 @@ func _check_achievements(won_game: bool = false) -> void:
 # --- Auto-Save & Continue System ------------------------------------------------------------
 
 func has_save_game() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	if not FileAccess.file_exists(SAVE_PATH):
+		return false
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return false
+	var data: Variant = f.get_var()
+	if not (data is Dictionary):
+		return false
+	return int((data as Dictionary).get("save_version", 0)) == SAVE_VERSION
 
 
 func saved_game_year() -> int:
-	if not FileAccess.file_exists(SAVE_PATH):
+	if not has_save_game():
 		return 2026
 	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
 	if f == null:
@@ -276,7 +286,9 @@ func save_game() -> void:
 	if f == null:
 		return
 	var payload: Dictionary = sim.serialize()
+	payload["save_version"] = SAVE_VERSION
 	payload["game_seed"] = game_seed
+	payload["hq_region"] = hq_region
 	f.store_var(payload)
 
 
@@ -295,10 +307,14 @@ func load_saved_game() -> bool:
 	if not (data is Dictionary):
 		return false
 	var d: Dictionary = data
+	if int(d.get("save_version", 0)) != SAVE_VERSION:
+		return false
 	Engine.time_scale = 1.0
 	game_seed = int(d.get("game_seed", randi()))
 	selected_difficulty = str(d.get("difficulty", "commander"))
-	sim = CrisisSim.new(game_seed, selected_difficulty)
+	var saved_hq: String = str(d.get("hq_region", RegionData.HERO_ID))
+	hq_region = saved_hq if RegionData.DEFS.has(saved_hq) else RegionData.HERO_ID
+	sim = CrisisSim.new(game_seed, selected_difficulty, hq_region)
 	sim.deserialize(d)
 	running = true
 	menu_paused = false
@@ -314,13 +330,17 @@ func load_saved_game() -> bool:
 
 
 ## Starts a fresh game. p_seed < 0 picks a random seed (logged for reproducibility).
-func new_game(p_seed: int = -1, p_difficulty: String = "") -> void:
+func new_game(p_seed: int = -1, p_difficulty: String = "", p_hq_region: String = "") -> void:
 	Engine.time_scale = 1.0
 	game_seed = p_seed if p_seed >= 0 else randi()
 	if p_difficulty != "":
 		selected_difficulty = p_difficulty
-	print("GameState: new game, seed ", game_seed, " diff: ", selected_difficulty)
-	sim = CrisisSim.new(game_seed, selected_difficulty)
+	if p_hq_region != "" and RegionData.DEFS.has(p_hq_region):
+		hq_region = p_hq_region
+	elif not RegionData.DEFS.has(hq_region):
+		hq_region = RegionData.HERO_ID
+	print("GameState: new game, seed ", game_seed, " diff: ", selected_difficulty, " hq: ", hq_region)
+	sim = CrisisSim.new(game_seed, selected_difficulty, hq_region)
 	running = true
 	menu_paused = false
 	_pause_reasons.clear()
@@ -480,11 +500,60 @@ func perform_action(action_id: String, region_id: String) -> bool:
 	AudioSynth.play_click()
 	vibrate_medium()
 	EventBus.action_performed.emit(action_id, region_id)
+	if str(result.get("combo", "")) != "":
+		AudioSynth.play_policy_adopt()
+		EventBus.combo_triggered.emit(str(result["combo"]), int(result.get("combo_until", 0)))
 	_publish_result(result)
 	_publish_all()
 	_check_achievements(false)
 	save_game()
 	return true
+
+
+func can_dispatch_fleet(target_id: String = "") -> bool:
+	return sim != null and running and not has_pause_reason("event") and sim.can_dispatch_fleet(target_id)
+
+
+func dispatch_fleet(target_id: String) -> bool:
+	if not can_dispatch_fleet(target_id):
+		return false
+	var result: Dictionary = sim.dispatch_fleet(target_id)
+	if not bool(result.get("ok", false)):
+		return false
+	AudioSynth.play_click()
+	vibrate_medium()
+	EventBus.fleet_dispatched.emit(str(result.get("from", hq_region)), target_id, result.get("path", []), int(result.get("eta", 2)))
+	_publish_result(result)
+	_publish_all()
+	save_game()
+	return true
+
+
+func combo_status(region_id: String) -> Dictionary:
+	if sim == null:
+		return {"active": false, "ticks_left": 0, "until_tick": 0, "actions": []}
+	return sim.combo_status(region_id)
+
+
+func fleet_status() -> Dictionary:
+	if sim == null:
+		return {"in_transit": false, "from": hq_region, "to": "", "path": [], "progress": 0.0, "eta_ticks": 0, "cooldown_ticks": 0, "hq_ok": false, "depart_tick": 0, "arrive_tick": 0}
+	var span: float = float(maxi(sim.fleet_arrive_tick - sim.fleet_depart_tick, 1))
+	var sub_prog: float = 0.0
+	if sim.fleet_target != "":
+		sub_prog = clampf((float(sim.tick - sim.fleet_depart_tick) + tick_progress()) / span, 0.0, 1.0)
+	return {
+		"in_transit": sim.fleet_target != "",
+		"from": sim.hq_region,
+		"to": sim.fleet_target,
+		"path": sim.fleet_path.duplicate(),
+		"progress": sub_prog,
+		"eta_ticks": maxi(sim.fleet_arrive_tick - sim.tick, 0) if sim.fleet_target != "" else 0,
+		"cooldown_ticks": maxi(sim.fleet_ready_at - sim.tick, 0),
+		"hq_ok": sim.is_fleet_hq_ready(),
+		"depart_tick": sim.fleet_depart_tick,
+		"arrive_tick": sim.fleet_arrive_tick,
+	}
 
 
 # --- Policy tree --------------------------------------------------------------------------
@@ -628,6 +697,16 @@ func debug_force_event(event_id: String) -> void:
 	EventBus.event_triggered.emit(str(ev.get("id", "")))
 
 
+func debug_force_summit(p_tick: int = 60) -> void:
+	if sim == null or not running:
+		return
+	var sm: Dictionary = sim.force_summit(p_tick)
+	if sm.is_empty():
+		return
+	set_pause_reason("summit", true)
+	EventBus.summit_triggered.emit(sm)
+
+
 # --- Data bubbles ---------------------------------------------------------------------------------
 
 func active_bubbles() -> Array:
@@ -651,13 +730,13 @@ func collect_bubble(bubble_id: int) -> bool:
 	return true
 
 
-func spawn_tutorial_bubble(kind: String = "science", region_id: String = "antalya") -> void:
+func spawn_tutorial_bubble(kind: String = "science", region_id: String = "") -> void:
 	if sim != null and running:
-		var b: Dictionary = sim.spawn_tutorial_bubble(kind, region_id)
+		var b: Dictionary = sim.spawn_tutorial_bubble(kind, region_id if region_id != "" else hq_region)
 		EventBus.bubble_spawned.emit(b)
 
 
-# --- COP31 Summits -------------------------------------------------------------------
+# --- Global Ocean Summits -------------------------------------------------------------------
 
 func current_summit() -> Dictionary:
 	if sim == null:
@@ -762,6 +841,9 @@ func _publish_result(result: Dictionary) -> void:
 	var expired: Array = result.get("bubbles_expired", [])
 	for x in expired:
 		EventBus.bubble_expired.emit(int(x))
+	var arrived: String = str(result.get("fleet_arrived", ""))
+	if arrived != "":
+		EventBus.fleet_arrived.emit(arrived)
 
 
 func _on_region_selected(region_id: String) -> void:

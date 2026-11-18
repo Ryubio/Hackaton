@@ -19,6 +19,11 @@ signal action_performed(action_id: String, region_id: String)
 # --- Map interaction ---
 signal region_hovered(region_id: String)
 signal region_selected(region_id: String)
+signal map_layer_changed(layer: int)
+signal fleet_targeting_changed(active: bool)
+signal fleet_dispatched(from_id: String, to_id: String, path: Array, eta_ticks: int)
+signal fleet_arrived(to_id: String)
+signal combo_triggered(region_id: String, until_tick: int)
 
 # --- Feedback / UI ---
 ## severity: 0 = info, 1 = good news, 2 = warning, 3 = alarm (alarm also shakes the camera)

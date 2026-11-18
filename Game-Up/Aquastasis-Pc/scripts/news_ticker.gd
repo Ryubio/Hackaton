@@ -1,7 +1,7 @@
 extends Control
 ## NewsTicker: the localized scrolling marquee in the HUD's 32 px top strip. Headlines come
 ## from EventBus.news and from ambient items generated out of live state (region stats and
-## trends, basin indicators, tips, real Mediterranean facts). Items are kept as key + args and
+## trends, ocean indicators, tips, real global ocean facts). Items are kept as key + args and
 ## re-rendered on language_changed; tone (-1 alarming, 0 neutral, 1 hopeful) colors them.
 
 const UITheme := preload("res://scripts/ui_theme.gd")
@@ -10,9 +10,9 @@ const TechTree := preload("res://scripts/tech_tree.gd")
 
 const SPEED := 92.0             # scroll speed, px per second
 const GAP := 46.0               # space between two headlines (the separator sits in it)
-const FONT_SIZE := 14
-const CHIP_FONT_SIZE := 10
-const TAG_FONT_SIZE := 12
+const FONT_SIZE := 17
+const CHIP_FONT_SIZE := 13
+const TAG_FONT_SIZE := 14
 const CHIP_PAD := 7.0
 const SLANT := 14.0
 const EDGE_FADE := 40.0
@@ -27,7 +27,7 @@ const FACT_KEYS := [
 	"news.fact.biodiversity", "news.fact.warming", "news.fact.plastic", "news.fact.posidonia",
 	"news.fact.posidonia_loss", "news.fact.caretta", "news.fact.monk_seal", "news.fact.lionfish",
 	"news.fact.mucilage", "news.fact.overfishing", "news.fact.renewal", "news.fact.barcelona",
-	"news.fact.cop31",
+	"news.fact.summit",
 ]
 const CHIP_KEYS := {"breaking": "news.chip.breaking", "good": "news.chip.good", "fact": "news.chip.fact", "tip": "news.chip.tip"}
 
@@ -463,7 +463,7 @@ func _draw_items() -> void:
 			var fill_a: float = 0.16
 			if chip == "breaking":
 				fill_a = 0.18 + 0.22 * blink
-			var r := Rect2(Vector2(x, cy - 8.0), Vector2(cw, 16.0))
+			var r := Rect2(Vector2(x, cy - 10.0), Vector2(cw, 20.0))
 			_scroller.draw_rect(r, UITheme.with_alpha(cc, fill_a))
 			_scroller.draw_rect(r, UITheme.with_alpha(cc, 0.85), false, 1.0)
 			_scroller.draw_string(chip_font, Vector2(x + CHIP_PAD, chip_base), str(d["chip_text"]), HORIZONTAL_ALIGNMENT_LEFT, -1, CHIP_FONT_SIZE, cc.lerp(Color.WHITE, 0.35))

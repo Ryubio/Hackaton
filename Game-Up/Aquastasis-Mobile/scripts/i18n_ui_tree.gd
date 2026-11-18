@@ -5,7 +5,7 @@ extends RefCounted
 const STRINGS := {
 	# --- Policy tree: header ---
 	"ui.tree.title": {"tr": "POLİTİKA AĞACI", "en": "POLICY TREE", "ru": "ДРЕВО ПОЛИТИК"},
-	"ui.tree.subtitle": {"tr": "COP31 Deniz Koalisyonu · kalıcı politikalar · zaman duraklatıldı", "en": "COP31 Marine Coalition · permanent policies · time is paused", "ru": "Морская коалиция COP31 · постоянные политики · время остановлено"},
+	"ui.tree.subtitle": {"tr": "Küresel Deniz Koalisyonu · kalıcı politikalar · zaman duraklatıldı", "en": "Global Marine Coalition · permanent policies · time is paused", "ru": "Глобальная морская коалиция · постоянные политики · время остановлено"},
 	"ui.tree.adopted_count": {"tr": "Kabul Edilen: {n}/{total}", "en": "Adopted: {n}/{total}", "ru": "Принято: {n}/{total}"},
 	"ui.tree.close": {"tr": "Kapat", "en": "Close", "ru": "Закрыть"},
 	"ui.tree.hint": {"tr": "Ayrıntılar için tıkla · kabul etmek için çift tıkla", "en": "Click a policy for details · double-click to adopt", "ru": "Нажмите для деталей · двойной клик для принятия"},
@@ -51,17 +51,19 @@ const STRINGS := {
 	"ui.tree.evo.none": {"tr": "Henüz yok. Dengeli strateji krizi zayıf tutar.", "en": "None so far. A varied strategy keeps it that way.", "ru": "Пока нет. Сбалансированная тактика сдерживает мутации."},
 	"ui.tree.evo.cure": {"tr": "Çözüm:", "en": "Cure:", "ru": "Лечение:"},
 	"ui.tree.evo.more": {"tr": "Ayrıca aktif: {n}", "en": "Also active: {n}", "ru": "Также активно: {n}"},
+	"ui.tree.tab.crisis_projects": {"tr": "Kriz & Projeler", "en": "Crisis & Projects", "ru": "Кризис и проекты"},
+	"ui.tree.resist.counters_list": {"tr": "Çözen Politikalar:", "en": "Counter Policies:", "ru": "Контр-политики:"},
 
 	# --- Decision card ---
 	"ui.card.kind.alert": {"tr": "EKOLOJİK ALARM", "en": "ECOLOGICAL ALERT", "ru": "ЭКОЛОГИЧЕСКАЯ ТРЕВОГА"},
 	"ui.card.kind.pressure": {"tr": "SİYASİ BASKI", "en": "POLITICAL PRESSURE", "ru": "ПОЛИТИЧЕСКОЕ ДАВЛЕНИЕ"},
 	"ui.card.kind.opportunity": {"tr": "FIRSAT", "en": "OPPORTUNITY", "ru": "ВОЗМОЖНОСТЬ"},
-	"ui.card.kind.summit": {"tr": "COP31 ZİRVESİ", "en": "COP31 SUMMIT", "ru": "САММИТ COP31"},
+	"ui.card.kind.summit": {"tr": "KÜRESEL OKYANUS ZİRVESİ", "en": "GLOBAL OCEAN SUMMIT", "ru": "ГЛОБАЛЬНЫЙ ОКЕАНИЧЕСКИЙ САММИТ"},
 	"ui.card.decision": {"tr": "KARAR GEREKİYOR", "en": "DECISION REQUIRED", "ru": "ТРЕБУЕТСЯ РЕШЕНИЕ"},
 	"ui.card.paused": {"tr": "Sen karar verene kadar zaman duraklatıldı.", "en": "Time is paused until you decide.", "ru": "Время остановлено до принятия решения."},
-	"ui.card.basin_wide": {"tr": "Tüm havza", "en": "Whole basin", "ru": "Весь бассейн"},
+	"ui.card.basin_wide": {"tr": "Tüm okyanuslar", "en": "Global oceans", "ru": "Мировой океан"},
 	"ui.card.free": {"tr": "Maliyetsiz", "en": "No cost", "ru": "Бесплатно"},
-	"ui.card.tone.pos": {"tr": "DENİZİ KORUR", "en": "PROTECTS THE SEA", "ru": "ЗАЩИЩАЕТ МОРЕ"},
+	"ui.card.tone.pos": {"tr": "OKYANUSU KORUR", "en": "PROTECTS THE OCEAN", "ru": "ЗАЩИЩАЕТ ОКЕАН"},
 	"ui.card.tone.neutral": {"tr": "UZLAŞI", "en": "TRADE-OFF", "ru": "КОМПРОМИСС"},
 	"ui.card.tone.neg": {"tr": "RİSKLİ", "en": "RISKY", "ru": "РИСКОВАННО"},
 	"ui.card.cant_afford": {"tr": "Yetersiz kaynak", "en": "Not enough resources", "ru": "Недостаточно ресурсов"},
@@ -71,5 +73,5 @@ const STRINGS := {
 	"ui.card.keys_choose": {"tr": "Seçim için 1 veya 2'ye bas", "en": "Press 1 or 2 to choose", "ru": "Нажмите 1 или 2 для выбора"},
 	"ui.card.keys_continue": {"tr": "Enter: devam et", "en": "Enter: continue", "ru": "Enter: продолжить"},
 	"ui.card.unknown_title": {"tr": "Beklenmedik Gelişme", "en": "Unexpected Development", "ru": "Неожиданное событие"},
-	"ui.card.unknown_text": {"tr": "Havzada önemli bir durum meydana geldi. Koalisyonun nasıl yanıt vereceğini seç.", "en": "Something is happening in the basin. Choose how the coalition responds.", "ru": "В бассейне произошло важное событие. Выберите ответ коалиции."},
+	"ui.card.unknown_text": {"tr": "Okyanuslarda önemli bir durum meydana geldi. Koalisyonun nasıl yanıt vereceğini seç.", "en": "Something is happening across the oceans. Choose how the coalition responds.", "ru": "В океане произошло важное событие. Выберите ответ коалиции."},
 }

@@ -85,18 +85,32 @@ var _next_bubble_id: int = 1
 var project_ready_at: Dictionary = {}
 var _bio_algae_count: int = 0
 var difficulty: String = "commander"
-var antalya_collapse_limit: float = 75.0
+var hq_region: String = RegionData.HERO_ID
+var hq_collapse_limit: float = B.HQ_COLLAPSE_DEFAULT
 var pending_summit: Dictionary = {}
+var fleet_ready_at: int = 0
+var fleet_target: String = ""
+var fleet_path: Array = []
+var fleet_depart_tick: int = 0
+var fleet_arrive_tick: int = 0
+var _combo_marks: Dictionary = {}        # region_id -> {action_id -> tick}
+var _combo_until: Dictionary = {}        # region_id -> tick until combo shield expires
+var active_pledge: Dictionary = {}       # previous summit's 5-year pledge target
+var _last_summit_health: float = 55.0
+var _last_summit_temp: float = B.TEMP_START
+var _last_summit_spreads: int = 0
+var _last_summit_bio: float = 50.0
 
 
-func _init(p_seed: int = B.DEFAULT_SEED, p_difficulty: String = "commander") -> void:
-	reset(p_seed, p_difficulty)
+func _init(p_seed: int = B.DEFAULT_SEED, p_difficulty: String = "commander", p_hq_region: String = RegionData.HERO_ID) -> void:
+	reset(p_seed, p_difficulty, p_hq_region)
 
 
-func reset(p_seed: int, p_difficulty: String = "commander") -> void:
+func reset(p_seed: int, p_difficulty: String = "commander", p_hq_region: String = RegionData.HERO_ID) -> void:
 	difficulty = p_difficulty
+	hq_region = p_hq_region if RegionData.DEFS.has(p_hq_region) else RegionData.HERO_ID
 	var diff_def: Dictionary = B.DIFFICULTIES.get(difficulty, B.DIFFICULTIES["commander"])
-	antalya_collapse_limit = float(diff_def.get("antalya_collapse_limit", 75.0))
+	hq_collapse_limit = float(diff_def.get("hq_collapse_limit", B.HQ_COLLAPSE_DEFAULT))
 	var res_mult: float = float(diff_def.get("resource_mult", 1.0))
 	var poll_mult: float = float(diff_def.get("pollution_mult", 1.0))
 
@@ -108,7 +122,15 @@ func reset(p_seed: int, p_difficulty: String = "commander") -> void:
 	_band.clear()
 	project_ready_at.clear()
 	pending_summit.clear()
+	active_pledge.clear()
 	_bio_algae_count = 0
+	fleet_ready_at = 0
+	fleet_target = ""
+	fleet_path = []
+	fleet_depart_tick = 0
+	fleet_arrive_tick = 0
+	_combo_marks.clear()
+	_combo_until.clear()
 	for rid in RegionData.IDS:
 		var region_id: String = rid
 		var r: RegionData = RegionData.new(region_id)
@@ -147,6 +169,10 @@ func reset(p_seed: int, p_difficulty: String = "commander") -> void:
 	_next_milestone = 0
 	_depleted_ticks = 0
 	_low_warned = false
+	_last_summit_health = sea_health()
+	_last_summit_temp = B.TEMP_START
+	_last_summit_spreads = 0
+	_last_summit_bio = _avg_bio()
 	_reset_phase2()
 
 
@@ -218,6 +244,7 @@ func step() -> Dictionary:
 		r.clamp_all()
 	# 3. Crisis spreads along currents and shipping lanes.
 	_update_spread(spreads, toasts, news)
+	_update_fleet(res)
 	# 4. Climate, economy and alerts.
 	_update_temperature(toasts, news)
 	_update_resources(toasts, news)
@@ -234,6 +261,10 @@ func step() -> Dictionary:
 		if B.SUMMIT_TICKS.has(tick) and pending_summit.is_empty():
 			pending_summit = _generate_summit(tick)
 			res["summit"] = pending_summit.duplicate(true)
+			var pe: Dictionary = pending_summit.get("pledge_eval", {})
+			if bool(pe.get("has", false)):
+				var p_ok: bool = bool(pe.get("passed", false))
+				res["toasts"].append(["sim.toast.pledge.passed" if p_ok else "sim.toast.pledge.failed", {}, 1 if p_ok else 2])
 	if tick % B.HISTORY_EVERY == 0 or over:
 		history.append([tick, sea_health(), avg_crisis()])
 	_finish_result(res)
@@ -260,10 +291,10 @@ func defcon_level() -> int:
 	if over and not won:
 		return 1
 	var avg_c: float = avg_crisis()
-	var ant_c: float = _region("antalya").crisis_level() if regions.has("antalya") else 50.0
-	if avg_c >= 70.0 or temperature >= 3.6 or ant_c >= antalya_collapse_limit - 8.0:
+	var hq_c: float = _region(hq_region).crisis_level() if regions.has(hq_region) else 50.0
+	if avg_c >= 70.0 or temperature >= 3.6 or hq_c >= hq_collapse_limit - 8.0:
 		return 1
-	elif avg_c >= 56.0 or temperature >= 3.1 or ant_c >= antalya_collapse_limit - 16.0:
+	elif avg_c >= 56.0 or temperature >= 3.1 or hq_c >= hq_collapse_limit - 16.0:
 		return 2
 	elif avg_c >= 45.0 or temperature >= 2.6:
 		return 3
@@ -272,66 +303,132 @@ func defcon_level() -> int:
 	return 5
 
 
-func antalya_integrity() -> float:
-	if not regions.has("antalya"):
+func hq_integrity() -> float:
+	if not regions.has(hq_region):
 		return 100.0
-	var c: float = _region("antalya").crisis_level()
-	return clampf(100.0 - (c / maxf(antalya_collapse_limit, 1.0) * 100.0), 0.0, 100.0)
+	var c: float = _region(hq_region).crisis_level()
+	return clampf(100.0 - (c / maxf(hq_collapse_limit, 1.0) * 100.0), 0.0, 100.0)
 
 
 func turtle_nests() -> int:
-	if not regions.has("antalya") or not regions.has("aegean"):
+	if not regions.has("coral_triangle") or not regions.has("caribbean"):
 		return 1000
-	var r_ant: RegionData = _region("antalya")
-	var r_aeg: RegionData = _region("aegean")
+	var r_ct: RegionData = _region("coral_triangle")
+	var r_cb: RegionData = _region("caribbean")
 	var base: float = 800.0
-	var seagrass_bonus: float = (r_ant.seagrass * 14.0) + (r_aeg.seagrass * 10.0)
-	var pollution_penalty: float = (r_ant.pollution * 12.0) + (r_aeg.pollution * 8.0)
+	var seagrass_bonus: float = (r_ct.seagrass * 14.0) + (r_cb.seagrass * 10.0)
+	var pollution_penalty: float = (r_ct.pollution * 12.0) + (r_cb.pollution * 8.0)
 	return int(clampf(base + seagrass_bonus - pollution_penalty, 150.0, 4200.0))
 
 
 func monk_seals() -> int:
-	if not regions.has("marmara") or not regions.has("adriatic"):
+	if not regions.has("arctic") or not regions.has("east_asian"):
 		return 120
-	var r_mar: RegionData = _region("marmara")
-	var r_adr: RegionData = _region("adriatic")
+	var r_arc: RegionData = _region("arctic")
+	var r_ea: RegionData = _region("east_asian")
 	var base: float = 80.0
-	var protect_bonus: float = (r_mar.protection * 2.2) + (r_adr.protection * 2.8)
-	var fish_bonus: float = (r_adr.fish_stock * 1.4)
-	var poll_penalty: float = (r_mar.pollution * 1.5)
+	var protect_bonus: float = (r_ea.protection * 2.2) + (r_arc.protection * 2.8)
+	var fish_bonus: float = (r_arc.fish_stock * 1.4)
+	var poll_penalty: float = (r_ea.pollution * 1.5)
 	return int(clampf(base + protect_bonus + fish_bonus - poll_penalty, 25.0, 550.0))
+
+
+func _avg_bio() -> float:
+	if regions.is_empty():
+		return 50.0
+	var acc: float = 0.0
+	for rid in RegionData.IDS:
+		var r: RegionData = _region(rid)
+		acc += (r.coral_health + r.seagrass + r.fish_stock) / 3.0
+	return acc / float(RegionData.IDS.size())
+
+
+func force_summit(p_tick: int = 60) -> Dictionary:
+	pending_summit = _generate_summit(p_tick)
+	return pending_summit.duplicate(true)
 
 
 func _generate_summit(p_tick: int) -> Dictionary:
 	var summit_yr: int = 2026 + int(p_tick / 12)
 	var h: float = sea_health()
+	var c_avg: float = avg_crisis()
+	var b_avg: float = _avg_bio()
 	var temp: float = temperature
-	var target_health: float = 54.0 if p_tick == 60 else (60.0 if p_tick == 120 else 66.0)
-	var is_success: bool = h >= target_health and temp < 3.2
-	var choices: Array = []
+	var pledge_eval: Dictionary = {"has": false}
+	if not active_pledge.is_empty():
+		var metric: String = str(active_pledge.get("metric", ""))
+		var tgt: float = float(active_pledge.get("target", 0.0))
+		var p_ok: bool = false
+		match metric:
+			"health":
+				p_ok = h >= tgt
+			"crisis":
+				p_ok = c_avg <= tgt
+			"bio":
+				p_ok = b_avg >= tgt
+		if p_ok:
+			budget = clampf(budget + B.SUMMIT_PLEDGE_PASS_BUDGET, 0.0, B.RESOURCE_CAP)
+			political = clampf(political + B.SUMMIT_PLEDGE_PASS_POLITICAL, 0.0, B.RESOURCE_CAP)
+		else:
+			political = clampf(political - B.SUMMIT_PLEDGE_FAIL_POLITICAL, 0.0, B.RESOURCE_CAP)
+		pledge_eval = {
+			"has": true,
+			"passed": p_ok,
+			"title_key": str(active_pledge.get("title_key", "")),
+		}
+		active_pledge.clear()
 
+	var target_health: float = 54.0 if p_tick == 60 else (60.0 if p_tick == 120 else 66.0)
+	var grade: String = "C"
+	if h >= target_health + B.SUMMIT_GRADE_S_MARGIN and temp < B.SUMMIT_GRADE_S_TEMP:
+		grade = "S"
+	elif h >= target_health and temp < B.SUMMIT_GRADE_A_TEMP:
+		grade = "A"
+	elif h >= target_health - B.SUMMIT_GRADE_B_MARGIN and temp < B.SUMMIT_GRADE_B_TEMP:
+		grade = "B"
+	var is_success: bool = (grade == "S" or grade == "A")
+
+	var pledges := [
+		{
+			"id": "crisis", "metric": "crisis",
+			"title_key": "summit.pledge.crisis.title",
+			"target_key": "summit.pledge.crisis.target",
+			"target": maxf(roundf(c_avg - B.SUMMIT_PLEDGE_CRISIS_DROP), 18.0),
+		},
+		{
+			"id": "health", "metric": "health",
+			"title_key": "summit.pledge.health.title",
+			"target_key": "summit.pledge.health.target",
+			"target": minf(roundf(h + B.SUMMIT_PLEDGE_HEALTH_GAIN), 80.0),
+		},
+		{
+			"id": "bio", "metric": "bio",
+			"title_key": "summit.pledge.bio.title",
+			"target_key": "summit.pledge.bio.target",
+			"target": minf(roundf(b_avg + B.SUMMIT_PLEDGE_BIO_GAIN), 82.0),
+		},
+	]
+
+	var choices: Array = []
 	if is_success:
 		choices = [
 			{
 				"title_key": "summit.choice.grant_budget.title",
 				"desc_key": "summit.choice.grant_budget.desc",
-				"budget": 150.0,
-				"political": 0.0,
-				"science": 0.0
+				"budget": 150.0, "political": 0.0, "science": 0.0,
+				"pledge": pledges[0],
 			},
 			{
 				"title_key": "summit.choice.mandate_pol.title",
 				"desc_key": "summit.choice.mandate_pol.desc",
-				"budget": 0.0,
-				"political": 45.0,
-				"science": 0.0
+				"budget": 0.0, "political": 45.0, "science": 0.0,
+				"pledge": pledges[1],
 			},
 			{
 				"title_key": "summit.choice.copernicus_sci.title",
 				"desc_key": "summit.choice.copernicus_sci.desc",
-				"budget": 0.0,
-				"political": 0.0,
-				"science": 50.0
+				"budget": 0.0, "political": 0.0, "science": 50.0,
+				"pledge": pledges[2],
 			}
 		]
 	else:
@@ -339,31 +436,46 @@ func _generate_summit(p_tick: int) -> Dictionary:
 			{
 				"title_key": "summit.choice.lobby_concession.title",
 				"desc_key": "summit.choice.lobby_concession.desc",
-				"budget": 40.0,
-				"political": -30.0,
-				"science": 0.0
+				"budget": 40.0, "political": -30.0, "science": 0.0,
+				"pledge": pledges[0],
 			},
 			{
 				"title_key": "summit.choice.fiscal_austerity.title",
 				"desc_key": "summit.choice.fiscal_austerity.desc",
-				"budget": -75.0,
-				"political": 10.0,
-				"science": 0.0
+				"budget": -75.0, "political": 10.0, "science": 0.0,
+				"pledge": pledges[1],
 			},
 			{
 				"title_key": "summit.choice.emergency_pledge.title",
 				"desc_key": "summit.choice.emergency_pledge.desc",
-				"budget": 0.0,
-				"political": 20.0,
-				"science": -35.0
+				"budget": 0.0, "political": 20.0, "science": -35.0,
+				"pledge": pledges[2],
 			}
 		]
+
+	var start_t: int = maxi(p_tick - 60, 0)
+	var trend: Array = []
+	for pt in history:
+		var arr: Array = pt
+		var pt_t: int = int(arr[0])
+		if pt_t >= start_t and pt_t <= p_tick:
+			trend.append(arr.duplicate())
+	if trend.size() < 2:
+		trend = [[start_t, _last_summit_health, 100.0 - _last_summit_health], [p_tick, h, c_avg]]
 
 	return {
 		"tick": p_tick,
 		"year": summit_yr,
+		"grade": grade,
 		"health": h,
+		"health_delta": h - _last_summit_health,
 		"temp": temp,
+		"temp_delta": temp - _last_summit_temp,
+		"spreads_5yr": maxi(spread_count - _last_summit_spreads, 0),
+		"bio": b_avg,
+		"bio_delta": b_avg - _last_summit_bio,
+		"trend": trend,
+		"pledge_eval": pledge_eval,
 		"success": is_success,
 		"title_key": "summit.%d.title" % summit_yr,
 		"desc_key": ("summit.%d.success.desc" if is_success else "summit.%d.failure.desc") % summit_yr,
@@ -384,6 +496,11 @@ func resolve_summit(choice_idx: int) -> Dictionary:
 	budget = clampf(budget + b_gain, 0.0, B.RESOURCE_CAP)
 	political = clampf(political + p_gain, 0.0, B.RESOURCE_CAP)
 	science = clampf(science + s_gain, 0.0, B.RESOURCE_CAP)
+	active_pledge = ch.get("pledge", {}).duplicate(true)
+	_last_summit_health = sea_health()
+	_last_summit_temp = temperature
+	_last_summit_spreads = spread_count
+	_last_summit_bio = _avg_bio()
 	var yr: int = int(pending_summit.get("year", 2031))
 	pending_summit.clear()
 	return {
@@ -465,8 +582,15 @@ func snapshot() -> Dictionary:
 		"cards_seen": cards_seen,
 		"bubbles_collected": bubbles_collected_total,
 		"defcon": defcon_level(),
-		"antalya_integrity": antalya_integrity(),
-		"antalya_crisis": _region("antalya").crisis_level(),
+		"hq_region": hq_region,
+		"hq_integrity": hq_integrity(),
+		"hq_crisis": _region(hq_region).crisis_level() if regions.has(hq_region) else 50.0,
+		"fleet_cooldown_left": maxi(fleet_ready_at - tick, 0),
+		"fleet_in_transit": fleet_target != "",
+		"fleet_target": fleet_target,
+		"fleet_path": fleet_path.duplicate(),
+		"fleet_progress": _fleet_progress(),
+		"fleet_eta_left": maxi(fleet_arrive_tick - tick, 0) if fleet_target != "" else 0,
 		"turtle_nests": turtle_nests(),
 		"monk_seals": monk_seals(),
 		"difficulty": difficulty,
@@ -499,7 +623,7 @@ func pollution_breakdown(region_id: String) -> Dictionary:
 			current_inflow += p * w * B.NEIGHBOR_PRESSURE_COEFF * _mul("neighbor_pressure_mult")
 
 	var coastal: float = r.coastal_pop * B.SOURCE_INFLOW_COEFF * _mul("inflow_mult") + B.BASE_POLLUTION_RATE * _mul("base_pollution_mult")
-	var heat_stress: float = heat * B.TEMP_STRESS_COEFF * _mul("heat_stress_mult")
+	var heat_stress: float = heat * r.heat_sensitivity * B.TEMP_STRESS_COEFF * _mul("heat_stress_mult")
 	var lever_share: float = r.pollution / B.LEVER_POLLUTION_REF
 	var protect_pull: float = r.protection * B.PROTECT_COEFF * _mul("protect_effect_mult") * lever_share
 	var aware_pull: float = r.awareness * B.AWARE_COEFF * _mul("aware_effect_mult") * lever_share
@@ -516,6 +640,29 @@ func pollution_breakdown(region_id: String) -> Dictionary:
 	}
 
 
+func is_combo_active(region_id: String) -> bool:
+	return int(_combo_until.get(region_id, -1)) > tick
+
+
+func combo_status(region_id: String) -> Dictionary:
+	if not regions.has(region_id):
+		return {"active": false, "ticks_left": 0, "until_tick": 0, "actions": []}
+	var until_t: int = int(_combo_until.get(region_id, 0))
+	var active: bool = until_t > tick
+	var marks: Dictionary = _combo_marks.get(region_id, {})
+	var recent: Array[String] = []
+	for a in B.ACTION_ORDER:
+		var aid: String = str(a)
+		if marks.has(aid) and (tick - int(marks[aid])) <= B.COMBO_WINDOW_TICKS:
+			recent.append(aid)
+	return {
+		"active": active,
+		"ticks_left": maxi(until_t - tick, 0) if active else 0,
+		"until_tick": until_t if active else 0,
+		"actions": recent,
+	}
+
+
 func region_dict(region_id: String) -> Dictionary:
 	if not regions.has(region_id):
 		return {}
@@ -523,6 +670,10 @@ func region_dict(region_id: String) -> Dictionary:
 	var d: Dictionary = r.to_dict()
 	d["breakdown"] = pollution_breakdown(region_id)
 	d["trait_key"] = "region." + region_id + ".trait"
+	var cs: Dictionary = combo_status(region_id)
+	d["combo_active"] = bool(cs["active"])
+	d["combo_ticks_left"] = int(cs["ticks_left"])
+	d["combo_actions"] = cs["actions"]
 	return d
 
 
@@ -609,6 +760,70 @@ func can_afford(action_id: String) -> bool:
 	return _has_resources(action_cost(action_id))
 
 
+func _fleet_progress() -> float:
+	if fleet_target == "" or fleet_arrive_tick <= fleet_depart_tick:
+		return 0.0
+	return clampf(float(tick - fleet_depart_tick) / float(fleet_arrive_tick - fleet_depart_tick), 0.0, 1.0)
+
+
+func is_fleet_hq_ready() -> bool:
+	return regions.has(hq_region) and _region(hq_region).crisis_level() < B.FLEET_HQ_CRISIS_MAX
+
+
+func can_dispatch_fleet(target_id: String = "") -> bool:
+	if over or not pending_event.is_empty() or not pending_summit.is_empty():
+		return false
+	if fleet_target != "" or tick < fleet_ready_at or not is_fleet_hq_ready():
+		return false
+	if budget < B.FLEET_BUDGET_COST:
+		return false
+	if target_id != "":
+		return regions.has(target_id) and target_id != hq_region
+	return true
+
+
+func dispatch_fleet(target_id: String) -> Dictionary:
+	var res: Dictionary = _new_move_result()
+	if not can_dispatch_fleet(target_id):
+		return res
+	var path: Array = RegionData.shortest_path(hq_region, target_id)
+	var dist: int = RegionData.route_distance(hq_region, target_id)
+	var travel: int = maxi(dist * B.FLEET_TICKS_PER_HOP, B.FLEET_MIN_TRAVEL_TICKS)
+	budget = maxf(budget - B.FLEET_BUDGET_COST, 0.0)
+	fleet_target = target_id
+	fleet_path = path
+	fleet_depart_tick = tick
+	fleet_arrive_tick = tick + travel
+	fleet_ready_at = tick + B.FLEET_COOLDOWN_TICKS
+	res["ok"] = true
+	res["from"] = hq_region
+	res["to"] = target_id
+	res["path"] = path.duplicate()
+	res["eta"] = travel
+	res["toasts"].append(["sim.toast.fleet.dispatched", {"to": _region(target_id).name_key, "eta": str(travel)}, 1])
+	return res
+
+
+func _update_fleet(res: Dictionary) -> void:
+	if fleet_target == "" or tick < fleet_arrive_tick:
+		return
+	var target_id: String = fleet_target
+	if regions.has(target_id):
+		var r: RegionData = _region(target_id)
+		r.pollution -= B.FLEET_POLLUTION_DROP
+		r.protection += B.FLEET_PROTECTION_BOOST
+		r.coral_health += B.FLEET_BIO_BOOST
+		r.seagrass += B.FLEET_BIO_BOOST
+		r.clamp_all()
+		res["fleet_arrived"] = target_id
+		res["toasts"].append(["sim.toast.fleet.arrived", {"to": r.name_key}, 1])
+		res["news"].append(["sim.news.fleet.arrived", {"to": r.name_key}, 1])
+	fleet_target = ""
+	fleet_path = []
+	fleet_depart_tick = 0
+	fleet_arrive_tick = 0
+
+
 ## Field operations are refused while a decision card waits for an answer.
 func can_perform(action_id: String, region_id: String) -> bool:
 	return not over and pending_event.is_empty() and regions.has(region_id) \
@@ -661,7 +876,7 @@ func perform(action_id: String, region_id: String) -> Dictionary:
 				var other: RegionData = _region(other_id)
 				other.awareness += _saturated(campaign_gain * B.CAMPAIGN_NEIGHBOR_SHARE, other.awareness, B.CAMPAIGN_SATURATION)
 				other.clamp_all()
-			r.pollution = maxf(0.0, r.pollution - 2.0 * _mul("campaign_power_mult"))
+			r.pollution = maxf(0.0, r.pollution - B.CAMPAIGN_POLLUTION_DROP * _mul("campaign_power_mult"))
 	r.clamp_all()
 
 	var cooldown: int = int(def["cooldown_ticks"])
@@ -674,6 +889,29 @@ func perform(action_id: String, region_id: String) -> Dictionary:
 	var toasts: Array = res["toasts"]
 	toasts.append([toast_key, {"region": r.name_key}, 0])
 	_record_move(branch)
+
+	var marks: Dictionary = _combo_marks.get(region_id, {})
+	var clean_marks: Dictionary = {}
+	for k in marks.keys():
+		if (tick - int(marks[k])) <= B.COMBO_WINDOW_TICKS:
+			clean_marks[str(k)] = int(marks[k])
+	clean_marks[action_id] = tick
+	_combo_marks[region_id] = clean_marks
+	if clean_marks.size() >= B.ACTION_ORDER.size():
+		_combo_marks.erase(region_id)
+		var until_t: int = tick + B.COMBO_SHIELD_TICKS
+		_combo_until[region_id] = until_t
+		r.coral_health += B.COMBO_CORAL_BOOST
+		r.seagrass += B.COMBO_SEAGRASS_BOOST
+		r.fish_stock += B.COMBO_FISH_BOOST
+		r.clamp_all()
+		political = minf(political + B.COMBO_POLITICAL_BONUS, B.RESOURCE_CAP)
+		res["combo"] = region_id
+		res["combo_until"] = until_t
+		toasts.append(["sim.toast.combo", {"region": r.name_key}, 1])
+		var news: Array = res["news"]
+		news.append(["sim.news.combo", {"region": r.name_key}, 1])
+
 	res["ok"] = true
 	return res
 
@@ -698,12 +936,12 @@ func _pollution_delta(r: RegionData, heat: float) -> float:
 	var aware_pull: float = r.awareness * B.AWARE_COEFF * _mul("aware_effect_mult")
 	return B.BASE_POLLUTION_RATE * _mul("base_pollution_mult") \
 		+ pressure * B.NEIGHBOR_PRESSURE_COEFF * _mul("neighbor_pressure_mult") \
-		+ heat * B.TEMP_STRESS_COEFF * _mul("heat_stress_mult") \
+		+ heat * r.heat_sensitivity * B.TEMP_STRESS_COEFF * _mul("heat_stress_mult") \
 		+ r.coastal_pop * B.SOURCE_INFLOW_COEFF * _mul("inflow_mult") \
 		- (protect_pull + aware_pull) * lever_share
 
 
-## Coral, Posidonia seagrass and fish respond to pollution, heat and protection.
+## Coral, seagrass and fish respond to pollution, heat and protection.
 func _update_ecology(r: RegionData, heat: float) -> void:
 	# Below BIO_SAFE_POLLUTION clean water lets life regrow; above it pollution damages it.
 	var clean01: float = clampf((B.BIO_SAFE_POLLUTION - r.pollution) / B.BIO_SAFE_POLLUTION, 0.0, 1.0)
@@ -711,7 +949,7 @@ func _update_ecology(r: RegionData, heat: float) -> void:
 	var prot01: float = r.protection / 100.0
 	# Protected reefs and meadows recover best in clean water (cleanup supports patrols).
 	var guarded01: float = prot01 * (1.0 - dirty01 * B.BIO_DIRTY_RECOVERY_CUT)
-	var heat_stress: float = heat * _mul("heat_stress_mult")
+	var heat_stress: float = heat * r.heat_sensitivity * _mul("heat_stress_mult")
 
 	# Room to grow ^ BIO_ROOM_EXPONENT: recovery is quick when degraded, slow near pristine.
 	var coral_room: float = pow(1.0 - r.coral_health / 100.0, B.BIO_ROOM_EXPONENT)
@@ -778,6 +1016,8 @@ func _update_spread(spreads: Array, toasts: Array, news: Array) -> void:
 			continue
 		var shield: float = 1.0 - clampf(dst.protection / 100.0 * B.SPREAD_PROTECTION_SHIELD, 0.0, 1.0)
 		var chance: float = B.SPREAD_CHANCE_PER_TICK * weight * _kind_mult(kind) * (c_src / 100.0) * shield * chance_mult
+		if is_combo_active(src.id):
+			chance *= B.COMBO_SPREAD_MULT
 		if rng.randf() >= chance:
 			continue
 		var hit: float = shield * damage_mult
@@ -837,7 +1077,7 @@ func income_rates() -> Dictionary:
 	return {"budget": budget_gain, "political": political_gain, "science": science_gain}
 
 
-## Regions whose Posidonia meadows earn blue-carbon credits (seagrass above BLUE_CARBON_SEAGRASS).
+## Regions whose seagrass meadows earn blue-carbon credits (seagrass above BLUE_CARBON_SEAGRASS).
 func blue_carbon_regions() -> int:
 	var n: int = 0
 	for rid in RegionData.IDS:
@@ -900,7 +1140,7 @@ func _update_region_alerts(toasts: Array, news: Array) -> void:
 
 
 func _check_end() -> void:
-	if _region("antalya").crisis_level() >= antalya_collapse_limit:
+	if regions.has(hq_region) and _region(hq_region).crisis_level() >= hq_collapse_limit:
 		_finish(false, "lose_hq")
 	elif temperature >= B.TEMP_LOSE:
 		_finish(false, "lose_temperature")
@@ -998,6 +1238,7 @@ func _new_result() -> Dictionary:
 	return {
 		"spreads": [], "toasts": [], "news": [], "evolutions": [], "cured": [],
 		"bubbles_spawned": [], "bubbles_expired": [], "event": {},
+		"fleet_arrived": "",
 		"game_over": false, "won": false, "reason": "",
 	}
 
@@ -1160,7 +1401,7 @@ func _effect_targets(target: String, event_region: String) -> Array:
 		"best":
 			return [_extreme_region(false)]
 		"hero":
-			return [RegionData.HERO_ID]
+			return [hq_region]
 	if regions.has(target):
 		return [target]
 	return []
@@ -1168,7 +1409,7 @@ func _effect_targets(target: String, event_region: String) -> Array:
 
 ## Region with the highest (worst = true) or lowest crisis level.
 func _extreme_region(worst: bool) -> String:
-	var best_id: String = RegionData.HERO_ID
+	var best_id: String = hq_region
 	var best_val: float = -1.0 if worst else 1000.0
 	for rid in RegionData.IDS:
 		var region_id: String = rid
@@ -1401,7 +1642,7 @@ func _evolve(evo_id: String, res: Dictionary) -> void:
 
 # --- Decision events -------------------------------------------------------------------------
 
-## Opens the next card when it is due: COP31 summits at their at_tick, otherwise a weighted
+## Opens the next card when it is due: ocean summits at their at_tick, otherwise a weighted
 ## random card every EVENT_INTERVAL_MIN..MAX ticks, kept clear of the summits.
 func _schedule_events(res: Dictionary) -> void:
 	if not pending_event.is_empty():
@@ -1479,7 +1720,7 @@ func _event_region(rule: String) -> String:
 		"best":
 			return _extreme_region(false)
 		"hero":
-			return RegionData.HERO_ID
+			return hq_region
 		"none", "":
 			return ""
 	if regions.has(rule):
@@ -1642,11 +1883,12 @@ func _update_bubbles(res: Dictionary) -> void:
 
 
 ## Spawns a dedicated bubble for onboarding/tutorial without waiting for RNG ticks.
-func spawn_tutorial_bubble(kind: String = "science", region_id: String = "antalya") -> Dictionary:
+func spawn_tutorial_bubble(kind: String = "science", region_id: String = "") -> Dictionary:
+	var target_reg: String = region_id if (region_id != "" and regions.has(region_id)) else hq_region
 	var bubble: Dictionary = {
 		"id": _next_bubble_id,
 		"kind": kind,
-		"region": region_id,
+		"region": target_reg,
 		"amount": 25.0,
 		"ttl": 240,
 		"born": tick,
@@ -1671,7 +1913,7 @@ func _bubble_region(political_kind: bool) -> String:
 		roll -= _region(region_id).awareness + B.BUBBLE_AWARENESS_WEIGHT
 		if roll < 0.0:
 			return region_id
-	return RegionData.HERO_ID
+	return hq_region
 
 
 # --- Save / Load Serialization --------------------------------------------------------------
@@ -1691,6 +1933,7 @@ func serialize() -> Dictionary:
 	return {
 		"tick": tick,
 		"difficulty": difficulty,
+		"hq_region": hq_region,
 		"temperature": temperature,
 		"budget": budget,
 		"political": political,
@@ -1706,6 +1949,18 @@ func serialize() -> Dictionary:
 		"ready_at": _ready_at.duplicate(true),
 		"project_ready_at": project_ready_at.duplicate(true),
 		"bio_algae_count": _bio_algae_count,
+		"fleet_ready_at": fleet_ready_at,
+		"fleet_target": fleet_target,
+		"fleet_path": fleet_path.duplicate(),
+		"fleet_depart_tick": fleet_depart_tick,
+		"fleet_arrive_tick": fleet_arrive_tick,
+		"combo_marks": _combo_marks.duplicate(true),
+		"combo_until": _combo_until.duplicate(true),
+		"active_pledge": active_pledge.duplicate(true),
+		"last_summit_health": _last_summit_health,
+		"last_summit_temp": _last_summit_temp,
+		"last_summit_spreads": _last_summit_spreads,
+		"last_summit_bio": _last_summit_bio,
 		"history": history.duplicate(true),
 		"seen_events": _seen_events.duplicate(true),
 		"next_event_tick": _next_event_tick,
@@ -1714,7 +1969,8 @@ func serialize() -> Dictionary:
 
 func deserialize(data: Dictionary) -> void:
 	var diff: String = str(data.get("difficulty", "commander"))
-	reset(B.DEFAULT_SEED, diff)
+	var hq: String = str(data.get("hq_region", RegionData.HERO_ID))
+	reset(B.DEFAULT_SEED, diff, hq)
 	tick = int(data.get("tick", 0))
 	temperature = float(data.get("temperature", B.TEMP_START))
 	budget = float(data.get("budget", B.BUDGET_START))
@@ -1743,6 +1999,18 @@ func deserialize(data: Dictionary) -> void:
 	_ready_at = data.get("ready_at", {}).duplicate(true)
 	project_ready_at = data.get("project_ready_at", {}).duplicate(true)
 	_bio_algae_count = int(data.get("bio_algae_count", 0))
+	fleet_ready_at = int(data.get("fleet_ready_at", 0))
+	fleet_target = str(data.get("fleet_target", ""))
+	fleet_path = data.get("fleet_path", []).duplicate()
+	fleet_depart_tick = int(data.get("fleet_depart_tick", 0))
+	fleet_arrive_tick = int(data.get("fleet_arrive_tick", 0))
+	_combo_marks = data.get("combo_marks", {}).duplicate(true)
+	_combo_until = data.get("combo_until", {}).duplicate(true)
+	active_pledge = data.get("active_pledge", {}).duplicate(true)
+	_last_summit_health = float(data.get("last_summit_health", sea_health()))
+	_last_summit_temp = float(data.get("last_summit_temp", B.TEMP_START))
+	_last_summit_spreads = int(data.get("last_summit_spreads", 0))
+	_last_summit_bio = float(data.get("last_summit_bio", _avg_bio()))
 	history = data.get("history", []).duplicate(true)
 	_seen_events = data.get("seen_events", {}).duplicate(true)
 	_next_event_tick = maxi(int(data.get("next_event_tick", tick + 18)), tick + 6)

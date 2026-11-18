@@ -120,6 +120,8 @@ func _continue_game() -> void:
 
 
 func _to_main_menu() -> void:
+	if GameState.running:
+		GameState.save_game()
 	_close_modals()
 	GameState.stop_game()
 	_clear_selection()
@@ -194,12 +196,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			if hud != null and hud.is_manual_open():
 				hud.close_manual()
+			elif hud != null and hud.is_fleet_targeting():
+				EventBus.fleet_targeting_changed.emit(false)
 			elif tree_ui.is_open():
 				tree_ui.close()
 			elif menu.is_pause_open():
 				_resume()
 			elif not menu.is_open():
 				_open_pause()
+		KEY_F1:
+			if _gameplay_input():
+				EventBus.map_layer_changed.emit(0)
+		KEY_F2:
+			if _gameplay_input():
+				EventBus.map_layer_changed.emit(1)
+		KEY_F3:
+			if _gameplay_input():
+				EventBus.map_layer_changed.emit(2)
 		KEY_F11:
 			var mode: int = DisplayServer.window_get_mode()
 			if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
@@ -237,6 +250,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _gameplay_input() and GameState.selected_region != "":
 				var action_id: String = Balance.ACTION_ORDER[int(ACTION_KEYS[code])]
 				GameState.perform_action(action_id, GameState.selected_region)
+		KEY_R:
+			if _gameplay_input() and hud != null:
+				hud.toggle_fleet_targeting()
 		_:
 			return
 	get_viewport().set_input_as_handled()

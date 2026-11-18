@@ -1,5 +1,5 @@
 extends RefCounted
-## Events: the 10-12 two-choice decision cards (oil spill, heatwave, COP31 summits, ...) as
+## Events: the 10-12 two-choice decision cards (oil spill, heatwave, Global Ocean Summits, ...) as
 ## DATA. crisis_sim.gd schedules them and applies choice effects; ui_event_card.gd shows
 ## them. Schema and effect vocabulary: docs/ARCHITECTURE.md section 11.
 
@@ -11,12 +11,12 @@ extends RefCounted
 ## Choice "a" is the paid response, choice "b" always costs nothing (it has a downside
 ## instead). Texts may use {region} (the card's region name) unless region_rule is "none".
 ## A "ticks" field on a mul / add effect makes it temporary (12 ticks = 1 game year).
-## The three COP31 summits are scheduled (at_tick 60 / 120 / 180 = 2031 / 2036 / 2041).
+## The three Global Ocean Summits are scheduled (at_tick 60 / 120 / 180 = 2031 / 2036 / 2041).
 const EVENTS := [
 	# --- Random cards -------------------------------------------------------------------
 	{
 		"id": "oil_spill", "weight": 10, "min_tick": 15, "max_tick": 230, "at_tick": -1, "once": true,
-		"region_rule": "random", "icon": "oil_spill",
+		"region_rule": "caribbean", "icon": "oil_spill",
 		"title_key": "event.oil_spill.title", "text_key": "event.oil_spill.text",
 		"choices": [
 			{
@@ -41,7 +41,7 @@ const EVENTS := [
 	},
 	{
 		"id": "heatwave", "weight": 8, "min_tick": 40, "max_tick": 230, "at_tick": -1, "once": true,
-		"region_rule": "random", "icon": "heat_alert",
+		"region_rule": "south_pacific", "icon": "heat_alert",
 		"title_key": "event.heatwave.title", "text_key": "event.heatwave.text",
 		"choices": [
 			{
@@ -115,7 +115,7 @@ const EVENTS := [
 	},
 	{
 		"id": "fishers_coop", "weight": 8, "min_tick": 15, "max_tick": 210, "at_tick": -1, "once": true,
-		"region_rule": "random", "icon": "fishers_coop",
+		"region_rule": "southern", "icon": "fishers_coop",
 		"title_key": "event.fishers_coop.title", "text_key": "event.fishers_coop.text",
 		"choices": [
 			{
@@ -139,7 +139,7 @@ const EVENTS := [
 	},
 	{
 		"id": "tourism_surge", "weight": 8, "min_tick": 20, "max_tick": 230, "at_tick": -1, "once": true,
-		"region_rule": "aegean", "icon": "tourism_surge",
+		"region_rule": "arctic", "icon": "tourism_surge",
 		"title_key": "event.tourism_surge.title", "text_key": "event.tourism_surge.text",
 		"choices": [
 			{
@@ -166,7 +166,7 @@ const EVENTS := [
 	},
 	{
 		"id": "mucilage", "weight": 9, "min_tick": 15, "max_tick": 200, "at_tick": -1, "once": true,
-		"region_rule": "marmara", "icon": "mucilage",
+		"region_rule": "east_asian", "icon": "mucilage",
 		"title_key": "event.mucilage.title", "text_key": "event.mucilage.text",
 		"choices": [
 			{
@@ -191,7 +191,7 @@ const EVENTS := [
 	},
 	{
 		"id": "foreign_trawlers", "weight": 8, "min_tick": 30, "max_tick": 230, "at_tick": -1, "once": true,
-		"region_rule": "best", "icon": "trawler",
+		"region_rule": "north_pacific", "icon": "trawler",
 		"title_key": "event.foreign_trawlers.title", "text_key": "event.foreign_trawlers.text",
 		"choices": [
 			{
@@ -239,14 +239,14 @@ const EVENTS := [
 		],
 	},
 
-	# --- Scheduled COP31 summits (2031 / 2036 / 2041) ---------------------------------------
+	# --- Scheduled Global Ocean Summits (2031 / 2036 / 2041) --------------------------------
 	{
-		"id": "cop31_2031", "weight": 0, "min_tick": 60, "max_tick": 60, "at_tick": 60, "once": true,
+		"id": "summit_2031", "weight": 0, "min_tick": 60, "max_tick": 60, "at_tick": 60, "once": true,
 		"region_rule": "none", "icon": "cop_summit",
-		"title_key": "event.cop31_2031.title", "text_key": "event.cop31_2031.text",
+		"title_key": "event.summit_2031.title", "text_key": "event.summit_2031.text",
 		"choices": [
 			{
-				"label_key": "event.cop31_2031.a.label", "result_key": "event.cop31_2031.a.result",
+				"label_key": "event.summit_2031.a.label", "result_key": "event.summit_2031.a.result",
 				"cost": {"budget": 0.0, "political": 25.0, "science": 0.0},
 				"effects": [
 					{"op": "mul", "key": "inflow_mult", "value": 0.8, "ticks": 60},
@@ -254,7 +254,7 @@ const EVENTS := [
 				"tone": 1,
 			},
 			{
-				"label_key": "event.cop31_2031.b.label", "result_key": "event.cop31_2031.b.result",
+				"label_key": "event.summit_2031.b.label", "result_key": "event.summit_2031.b.result",
 				"cost": {"budget": 0.0, "political": 0.0, "science": 0.0},
 				"effects": [
 					{"op": "resource", "key": "budget", "value": 100.0},
@@ -264,12 +264,12 @@ const EVENTS := [
 		],
 	},
 	{
-		"id": "cop31_2036", "weight": 0, "min_tick": 120, "max_tick": 120, "at_tick": 120, "once": true,
+		"id": "summit_2036", "weight": 0, "min_tick": 120, "max_tick": 120, "at_tick": 120, "once": true,
 		"region_rule": "none", "icon": "cop_summit",
-		"title_key": "event.cop31_2036.title", "text_key": "event.cop31_2036.text",
+		"title_key": "event.summit_2036.title", "text_key": "event.summit_2036.text",
 		"choices": [
 			{
-				"label_key": "event.cop31_2036.a.label", "result_key": "event.cop31_2036.a.result",
+				"label_key": "event.summit_2036.a.label", "result_key": "event.summit_2036.a.result",
 				"cost": {"budget": 0.0, "political": 30.0, "science": 0.0},
 				"effects": [
 					{"op": "region", "stat": "protection", "value": 10.0, "target": "all"},
@@ -277,7 +277,7 @@ const EVENTS := [
 				"tone": 1,
 			},
 			{
-				"label_key": "event.cop31_2036.b.label", "result_key": "event.cop31_2036.b.result",
+				"label_key": "event.summit_2036.b.label", "result_key": "event.summit_2036.b.result",
 				"cost": {"budget": 0.0, "political": 0.0, "science": 0.0},
 				"effects": [
 					{"op": "resource", "key": "budget", "value": 80.0},
@@ -288,12 +288,12 @@ const EVENTS := [
 		],
 	},
 	{
-		"id": "cop31_2041", "weight": 0, "min_tick": 180, "max_tick": 180, "at_tick": 180, "once": true,
+		"id": "summit_2041", "weight": 0, "min_tick": 180, "max_tick": 180, "at_tick": 180, "once": true,
 		"region_rule": "none", "icon": "cop_summit",
-		"title_key": "event.cop31_2041.title", "text_key": "event.cop31_2041.text",
+		"title_key": "event.summit_2041.title", "text_key": "event.summit_2041.text",
 		"choices": [
 			{
-				"label_key": "event.cop31_2041.a.label", "result_key": "event.cop31_2041.a.result",
+				"label_key": "event.summit_2041.a.label", "result_key": "event.summit_2041.a.result",
 				"cost": {"budget": 80.0, "political": 20.0, "science": 0.0},
 				"effects": [
 					{"op": "temperature", "value": -0.05},
@@ -302,7 +302,7 @@ const EVENTS := [
 				"tone": 1,
 			},
 			{
-				"label_key": "event.cop31_2041.b.label", "result_key": "event.cop31_2041.b.result",
+				"label_key": "event.summit_2041.b.label", "result_key": "event.summit_2041.b.result",
 				"cost": {"budget": 0.0, "political": 0.0, "science": 0.0},
 				"effects": [
 					{"op": "mul", "key": "budget_income_mult", "value": 1.2, "ticks": 60},
